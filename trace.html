@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+<title>Route tracer — Sakay Angeles</title>
+<script type="module" src="/src/trace.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><div class="brand-mark" aria-hidden="true">✎</div>
+    <div>Route tracer<small>Draw draft route lines on real roads</small></div></div>
+  <div class="top-right"><a class="btn btn-ghost" href="./index.html" style="display:inline-grid;place-items:center">← Back to app</a></div>
+</header>
+<div id="status-live" class="visually-hidden" role="status" aria-live="polite"></div>
+<div id="alert-banner" class="alert-banner" role="alert" hidden></div>
+<main class="layout">
+  <aside class="sidebar">
+    <p class="eyebrow">Contributor tool</p>
+    <h1>Trace a route</h1>
+    <div class="notice">Lines you draw here are <b>illustrative drafts</b>. They are shown dashed in the app and are <b>never</b> used for trip suggestions until stops and directions are verified.</div>
+
+    <ol class="muted" style="padding-left:18px;margin:0 0 12px">
+      <li>Pick a route, then <b>Direction A</b> or <b>B</b>.</li>
+      <li><b>Your first click is the START</b> (the terminal, e.g. Chevalier) and <b>your last click is the END</b>. Trace along the road in the order the jeepney travels. No typing needed.</li>
+      <li>Click along the road. With <b>Snap to roads</b> on, the path follows the streets (including one-way rules) between your clicks.</li>
+      <li>Drag a point to move it; double-click a point to delete it.</li>
+      <li>If the way back uses a different road, trace it as Direction B.</li>
+      <li>Press <b>Export</b>, then replace <code>public/data/routes.geojson</code>.</li>
+    </ol>
+    <label class="draft-toggle"><input type="checkbox" id="snap-toggle" checked> Snap to roads <small>(uses the public OSRM demo server; follows one-way streets; falls back to a straight line if unavailable)</small></label>
+
+    <form id="goto-form" class="field" autocomplete="off">
+      <label class="field-label" for="goto">Jump map to a place</label>
+      <div class="field-row"><input id="goto" type="text" placeholder="e.g. Holy Angel University" /><button class="btn btn-secondary" type="submit">Go</button></div>
+      <div id="goto-choices" class="choices-box"></div>
+    </form>
+
+    <div class="section-head"><h2 class="section-title">Routes</h2><span class="count" id="trace-count"></span></div>
+    <ul class="route-list" id="trace-list"></ul>
+
+    <div id="active-panel" class="card" hidden>
+      <h3 class="detail-title" id="active-title"></h3>
+      <div class="actions" role="group" aria-label="Direction">
+        <button type="button" class="btn btn-ghost" id="dir-a" data-dir="a" aria-pressed="true">Direction A</button>
+        <button type="button" class="btn btn-ghost" id="dir-b" data-dir="b" aria-pressed="false">Direction B</button>
+      </div>
+      <p class="muted" id="active-stats"></p>
+      <p class="detail-flag" id="active-warning" hidden></p>
+      <label class="draft-toggle"><input type="checkbox" id="twoway-toggle"> This line is ridden both ways <small>(leave off for one-way jeepney routes and loops)</small></label>
+      <p class="muted" id="active-hint"></p>
+      <details class="optional-names"><summary>Optional: add terminal names</summary>
+        <div class="field"><label class="field-label" for="start-name">Start terminal name</label><input id="start-name" type="text" placeholder="optional" /></div>
+        <div class="field"><label class="field-label" for="end-name">End terminal name</label><input id="end-name" type="text" placeholder="optional" /></div>
+      </details>
+      <p class="muted" id="active-landmarks"></p>
+      <div class="actions">
+        <button type="button" class="btn btn-ghost" id="undo-btn">Undo last point</button>
+        <button type="button" class="btn btn-ghost" id="clear-btn">Clear this direction</button>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn btn-ghost" id="reverse-btn">Reverse order</button>
+        <button type="button" class="btn btn-ghost" id="copy-return-btn">Copy A reversed to B</button>
+      </div>
+    </div>
+
+    <div class="section-head"><h2 class="section-title">Save your work</h2></div>
+    <div class="actions"><button type="button" class="btn btn-ghost" id="start-over-btn">Start over (clear every traced line)</button></div>
+    <div class="actions">
+      <button type="button" class="btn btn-primary" id="export-btn">Export GeoJSON</button>
+      <button type="button" class="btn btn-ghost" id="copy-btn">Copy</button>
+    </div>
+    <label class="field-label" for="import-file" style="margin-top:12px">Import a GeoJSON file</label>
+    <input id="import-file" type="file" accept=".geojson,.json,application/geo+json,application/json" />
+    <p class="hint">Your drafts are also kept in this browser automatically (localStorage). Export regularly — clearing browser data deletes them.</p>
+
+    <section aria-labelledby="ref-title">
+      <h2 id="ref-title" class="section-title" style="margin-top:20px">Reference maps</h2>
+      <ul class="ref-list" id="ref-list"></ul>
+    </section>
+    <footer class="notice notice-soft"><p>Basemap: OpenFreeMap © OpenMapTiles · Data from OpenStreetMap. Road snapping: OSRM demo server. Route information © 2021 Ray Haffenden / WayGo Maps (reuse permission unconfirmed).</p></footer>
+  </aside>
+  <section class="map-wrap" aria-label="Map">
+    <div id="map" class="map"></div>
+    <div class="map-legend" id="trace-legend"></div>
+  </section>
+</main>
+</body>
+</html>

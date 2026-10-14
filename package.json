@@ -1,0 +1,24 @@
+{
+  "name": "sakay-angeles-jeepney-finder",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "A mobile-friendly jeepney route discovery prototype for Angeles City, Pampanga.",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:lan": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test",
+    "validate:data": "node scripts/validate-data.js"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.14.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
+  }
+}

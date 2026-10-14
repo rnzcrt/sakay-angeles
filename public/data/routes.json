@@ -1,0 +1,582 @@
+{
+  "schemaVersion": 1,
+  "dataStatus": "Route names, colors and landmark lists are transcribed from the supplied legend image. No route has digitized geometry, ordered stops or verified directions yet.",
+  "source": {
+    "name": "HERE Angeles + Clark — Angeles City Jeepneys (route legend and route maps)",
+    "credit": "© 2021 Ray Haffenden / WayGo Maps (credit printed on the supplied schematic)",
+    "files": [
+      "assets/reference-maps/route-legend.jpeg",
+      "assets/reference-maps/route-schematic.jpeg",
+      "assets/reference-maps/route-geographic-map.jpeg"
+    ],
+    "reusePermission": "unconfirmed"
+  },
+  "routes": [
+    {
+      "id": "m-gate-friendship",
+      "name": "M Gate – Friendship",
+      "sourceLabel": "M GATE - FRIENDSHIP",
+      "sourceSubLabel": "Main Gate - Friendship/Korea Town",
+      "jeepneyColorName": "Sand",
+      "displayColor": "#C2A878",
+      "geometryStatus": "unverified",
+      "description": "Runs along Perimeter Road (Don Juico Avenue) from the Main Gate to Friendship Highway.",
+      "sourceLandmarks": [
+        "Main Gate",
+        "Friendship/Korea Town"
+      ],
+      "labelNotes": [],
+      "source": "route-legend.jpeg",
+      "directions": [],
+      "secondarySources": [
+        {
+          "source": "The Pooch of the Philippines (WordPress blog), text supplied by the project owner; original URL and date unknown",
+          "status": "unverified",
+          "matchToLegend": "Beige jeepney — 'Friendship – Main Gate'",
+          "startPoint": "Main Gate Terminal (Bayanihan Park / SM City Clark)",
+          "endPoint": "Friendship Highway Terminal (Korean Town)",
+          "roads": [
+            "Don Juico Avenue (Perimeter Road)",
+            "Fil-Am Friendship Highway"
+          ],
+          "landmarks": [
+            "Fields Avenue",
+            "Astro Park",
+            "Anunas Bridge",
+            "Korean Town commercial strip"
+          ],
+          "conflictsWithLegend": [
+            "Blog calls the color 'Beige'; the legend says 'Sand'.",
+            "Blog places the Main Gate terminal at Bayanihan Park / SM City Clark; the legend only says 'Main Gate'."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "checkpoint-balibago-highway",
+      "name": "C'Point – Balibago – Hi'way",
+      "sourceLabel": "C'POINT - BALIBAGO - HI'WAY",
+      "sourceSubLabel": "Check Point - Balibago - Highway",
+      "jeepneyColorName": "Grey",
+      "displayColor": "#6B7280",
+      "geometryStatus": "unverified",
+      "description": "",
+      "sourceLandmarks": [
+        "Checkpoint",
+        "Fields",
+        "Johnnies",
+        "Marlim",
+        "SR Lim",
+        "Robinsons",
+        "Crossing",
+        "Richtofen",
+        "Pampang",
+        "San Nicolas",
+        "Rizal",
+        "Jenra Mall",
+        "Plaridel"
+      ],
+      "labelNotes": [
+        "The legend spells one landmark 'Richtofen' here and 'Richtofer' on the Marisol – Pampang entry; verify the correct spelling."
+      ],
+      "source": "route-legend.jpeg",
+      "directions": [],
+      "secondarySources": [
+        {
+          "source": "The Pooch of the Philippines (WordPress blog), text supplied by the project owner; original URL and date unknown",
+          "status": "unverified",
+          "matchToLegend": "Gray jeepney — 'Check Point – Balibago – Holy'",
+          "startPoint": "Check Point Terminal (Balibago)",
+          "endPoint": "Jenra Grand Mall / Holy Angel University area (extends to Pampang Public Market at dawn)",
+          "roads": [
+            "MacArthur Highway",
+            "Henson Street",
+            "Plaridel Street"
+          ],
+          "landmarks": [
+            "Marlim Mansions",
+            "Robinsons Angeles",
+            "San Nicolas Public Market",
+            "Nepo Commercial Complex",
+            "HAU"
+          ],
+          "conflictsWithLegend": [
+            "Blog title ends in 'Holy'; the legend title ends in 'HI'WAY'.",
+            "Blog landmark list differs from the legend list (e.g. no Johnnies, Fields, SR Lim)."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "checkpoint-hensonville-holy",
+      "name": "C'Point – Hensonville – Holy",
+      "sourceLabel": "C'POINT - HENSONVILLE - HOLY",
+      "sourceSubLabel": "Check Point - Hensonville - Holy Rosary Church",
+      "jeepneyColorName": "White",
+      "displayColor": "#FFFFFF",
+      "geometryStatus": "unverified",
+      "description": "Runs from 21st Street, through Hensonville, to Holy Angel University & vice-versa.",
+      "sourceLandmarks": [
+        "21st Street",
+        "Hensonville",
+        "Holy Angel University / Holy Rosary Church"
+      ],
+      "labelNotes": [
+        "The legend's own text is ambiguous about the end of this route: the sub-label says 'Holy Rosary Church' while the description says 'Holy Angel University'. Verify which is correct (or whether both are served).",
+        "The description says 'vice-versa', which suggests service in both directions; the two directions have not been modelled yet."
+      ],
+      "source": "route-legend.jpeg",
+      "directions": [],
+      "secondarySources": [
+        {
+          "source": "The Pooch of the Philippines (WordPress blog), text supplied by the project owner; original URL and date unknown",
+          "status": "unverified",
+          "matchToLegend": "White jeepney — 'Check Point – Hensonville – Holy'",
+          "startPoint": "21st Street Terminal (Malabañas / Check Point)",
+          "endPoint": "Jenra Grand Mall Terminal (Downtown)",
+          "roads": [
+            "21st Street",
+            "Don Juico Avenue",
+            "Arayat Boulevard",
+            "Henson Street",
+            "Jesus Street"
+          ],
+          "landmarks": [
+            "Malabañas residential zone",
+            "Hensonville",
+            "Arayat Plaza",
+            "Downtown commercial zone near HAU"
+          ],
+          "conflictsWithLegend": [
+            "Blog ends at Jenra Grand Mall; the legend says Holy Angel University / Holy Rosary Church (itself ambiguous)."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sm-checkpoint-holy-highway",
+      "name": "SM – C'Point – Holy – Hi'way",
+      "sourceLabel": "SM - C'POINT - HOLY - HI'WAY",
+      "sourceSubLabel": "",
+      "jeepneyColorName": "Lavender",
+      "displayColor": "#8E7CC3",
+      "geometryStatus": "unverified",
+      "description": "",
+      "sourceLandmarks": [
+        "SM City",
+        "1st Street",
+        "Fields",
+        "Johnnies",
+        "Marlim",
+        "SRLim",
+        "Robinsons",
+        "Marisol"
+      ],
+      "labelNotes": [
+        "The route title includes 'Holy', but no 'Holy' landmark appears in the description list; verify what 'Holy' refers to."
+      ],
+      "source": "route-legend.jpeg",
+      "directions": [],
+      "secondarySources": [
+        {
+          "source": "The Pooch of the Philippines (WordPress blog), text supplied by the project owner; original URL and date unknown",
+          "status": "unverified",
+          "matchToLegend": "Purple jeepney — 'Check Point – Holy – Highway (Loop Route)'",
+          "startPoint": "Check Point / Main Gate Terminal",
+          "endPoint": "Loops back to Check Point / Main Gate Terminal",
+          "roads": [
+            "MacArthur Highway",
+            "Miranda Street",
+            "Sto. Entierro Street"
+          ],
+          "landmarks": [
+            "Fields Avenue",
+            "Holy Rosary Church (Pisambang Maragul)",
+            "Holy Angel University (HAU)",
+            "San Jose",
+            "Angeles University Foundation (AUF)",
+            "Salapungan"
+          ],
+          "conflictsWithLegend": [
+            "Blog says 'Purple'; the legend says 'Lavender'.",
+            "Blog title starts at Check Point and describes a loop; the legend title starts at SM and lists SM City, 1st Street, Fields, Johnnies, Marlim, SRLim, Robinsons, Marisol.",
+            "Whether this is a loop is unconfirmed."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "clark-main-gate-dau",
+      "name": "Clark – Main Gate – Dau",
+      "sourceLabel": "Clark - Main Gate -Dau",
+      "sourceSubLabel": "",
+      "jeepneyColorName": "Steel",
+      "displayColor": "#4F7A96",
+      "geometryStatus": "unverified",
+      "description": "Runs from SM City Clark to Dau along 1st Street and MacArthur to Jenra Mall for Dau/Mabalacat Bus Terminal.",
+      "sourceLandmarks": [
+        "SM City Clark",
+        "1st Street",
+        "MacArthur",
+        "Jenra Mall",
+        "Dau/Mabalacat Bus Terminal"
+      ],
+      "labelNotes": [
+        "The title mentions 'Main Gate' but the description does not; verify whether the route stops at the Main Gate."
+      ],
+      "source": "route-legend.jpeg",
+      "directions": [],
+      "secondarySources": [
+        {
+          "source": "The Pooch of the Philippines (WordPress blog), text supplied by the project owner; original URL and date unknown",
+          "status": "unverified",
+          "matchToLegend": "Silver jeepney — 'Clark – Main Gate – Dau'",
+          "startPoint": "SM City Clark / Main Gate Terminal",
+          "endPoint": "Jumbo Jenra Terminal (Dau, Mabalacat)",
+          "roads": [
+            "1st Street",
+            "MacArthur Highway"
+          ],
+          "landmarks": [
+            "SM City Clark",
+            "Bayanihan Park",
+            "Balibago strip",
+            "Dau Bus Terminal / Mabalacat boundary"
+          ],
+          "conflictsWithLegend": [
+            "Blog says 'Silver'; the legend says 'Steel'.",
+            "Blog ends at 'Jumbo Jenra Terminal'; the legend says 'Jenra Mall for Dau/Mabalacat Bus Terminal'.",
+            "Listing the 'Balibago strip' on a Clark–Dau route is unusual; verify."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "marisol-pampang",
+      "name": "Marisol – Pampang",
+      "sourceLabel": "MARISOL - PAMPANG",
+      "sourceSubLabel": "",
+      "jeepneyColorName": "Green",
+      "displayColor": "#16834A",
+      "geometryStatus": "unverified",
+      "description": "",
+      "sourceLandmarks": [
+        "Marisol",
+        "Magalang",
+        "AUF",
+        "Kuliat",
+        "Lakandula",
+        "HAU",
+        "Holy",
+        "Jenra Mall",
+        "Plaridel",
+        "San Nicolas",
+        "Pampang",
+        "Richtofer",
+        "Crossing"
+      ],
+      "labelNotes": [
+        "The legend reads 'PAMPANG' (not 'Pampanga'). 'Pampang Market' also appears on the Sapang Bato route, so the label probably refers to the Pampang area; verify before changing the wording.",
+        "'Richtofer' here vs 'Richtofen' on the Grey route; verify the spelling."
+      ],
+      "source": "route-legend.jpeg",
+      "directions": [],
+      "secondarySources": [
+        {
+          "source": "The Pooch of the Philippines (WordPress blog), text supplied by the project owner; original URL and date unknown",
+          "status": "unverified",
+          "matchToLegend": "Green jeepney — 'Marisol – Pampang'",
+          "startPoint": "Marisol Subdivision Terminal",
+          "endPoint": "Pampang Public Market Terminal",
+          "roads": [
+            "Kuliat Street",
+            "Lakandula Street",
+            "Plaridel Street",
+            "Richthofen Street"
+          ],
+          "landmarks": [
+            "Marisol Subdivision",
+            "Salapungan",
+            "AUF",
+            "HAU",
+            "Holy Rosary Church",
+            "Jenra Grand Mall",
+            "San Nicolas Market",
+            "Pampang Market"
+          ],
+          "conflictsWithLegend": [
+            "Largely consistent with the legend (blog omits Magalang and Crossing)."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sapang-bato-angeles",
+      "name": "Sapang Bato – Angles",
+      "sourceLabel": "SAPANG BATO - ANGLES",
+      "sourceSubLabel": "",
+      "jeepneyColorName": "Maroon",
+      "displayColor": "#A91F2B",
+      "geometryStatus": "unverified",
+      "description": "",
+      "sourceLandmarks": [
+        "Sapang Bato",
+        "Margot",
+        "Friendship",
+        "Anunas",
+        "Timog Park",
+        "Carmenville",
+        "City College",
+        "Kalayaan",
+        "Pampang Market"
+      ],
+      "labelNotes": [
+        "The legend spells the destination 'ANGLES'. This is probably 'Angeles' but is preserved as written; verify."
+      ],
+      "source": "route-legend.jpeg",
+      "directions": [],
+      "secondarySources": [
+        {
+          "source": "The Pooch of the Philippines (WordPress blog), text supplied by the project owner; original URL and date unknown",
+          "status": "unverified",
+          "matchToLegend": "Red jeepney — 'Angeles – Sapangbato'",
+          "startPoint": "Brgy. Sapangbato Terminal",
+          "endPoint": "Nepo Mart / HAU Terminal",
+          "roads": [
+            "Sapangbato Road",
+            "Fil-Am Friendship Highway",
+            "Miranda Street Extension"
+          ],
+          "landmarks": [
+            "Brgy. Sapangbato",
+            "Brgy. Margot",
+            "Friendship crossing",
+            "Cutcut",
+            "Nepo Mart",
+            "HAU"
+          ],
+          "conflictsWithLegend": [
+            "Blog says 'Red'; the legend says 'Maroon'.",
+            "Blog reads 'Angeles', which may explain the legend's 'ANGLES' — but the legend wording is kept until confirmed.",
+            "Blog ends at Nepo Mart / HAU; the legend ends at Pampang Market."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pandang-pampang",
+      "name": "Pandan – Pampang",
+      "sourceLabel": "PANDANG - PAMPANG",
+      "sourceSubLabel": "",
+      "jeepneyColorName": "Blue",
+      "displayColor": "#1677B8",
+      "geometryStatus": "unverified",
+      "description": "",
+      "sourceLandmarks": [
+        "City Hall",
+        "Mining",
+        "MacArthur",
+        "Kuliat",
+        "Pamintuan Residence",
+        "Plaridel"
+      ],
+      "labelNotes": [
+        "The legend prints 'PANDANG - PAMPANG'. The project owner (who knows the area) confirms the place is 'Pandan', so the display name uses 'Pandan'; the printed legend label is kept in sourceLabel. The route id stays 'pandang-pampang' so existing traced files keep working."
+      ],
+      "source": "route-legend.jpeg",
+      "directions": [],
+      "secondarySources": [
+        {
+          "source": "The Pooch of the Philippines (WordPress blog), text supplied by the project owner; original URL and date unknown",
+          "status": "unverified",
+          "matchToLegend": "Dark blue / navy jeepney — 'Pandan – Pampang'",
+          "startPoint": "Brgy. Pandan Terminal",
+          "endPoint": "Pampang Public Market Terminal",
+          "roads": [
+            "Angeles-Magalang Road",
+            "Sto. Rosario Street",
+            "Plaridel Street"
+          ],
+          "landmarks": [
+            "Brgy. Pandan",
+            "Salapungan",
+            "Sto. Rosario (City Proper)",
+            "San Nicolas Market",
+            "Pampang Market"
+          ],
+          "conflictsWithLegend": [
+            "Blog spells 'Pandan'; the legend reads 'PANDANG'.",
+            "Blog says 'Dark Blue / Navy'; the legend says 'Blue'.",
+            "Blog landmarks (Salapungan, Sto. Rosario, San Nicolas) do not match the legend list (City Hall, Mining, MacArthur, Kuliat, Pamintuan Residence, Plaridel)."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sunset-nepo",
+      "name": "Sunset – Nepo",
+      "sourceLabel": "SUNSET - NEPO",
+      "sourceSubLabel": "",
+      "jeepneyColorName": "Orange",
+      "displayColor": "#E8830C",
+      "geometryStatus": "unverified",
+      "description": "",
+      "sourceLandmarks": [
+        "Sunset",
+        "1976",
+        "Initial",
+        "Champaca",
+        "Nepo Mart"
+      ],
+      "labelNotes": [
+        "The schematic map labels this line 'Sunset - Carmenville - Nepo'; the legend omits Carmenville. Verify."
+      ],
+      "source": "route-legend.jpeg",
+      "directions": [],
+      "secondarySources": [
+        {
+          "source": "The Pooch of the Philippines (WordPress blog), text supplied by the project owner; original URL and date unknown",
+          "status": "unverified",
+          "matchToLegend": "Part of 'Orange / Light Blue jeepney — Sunset – Nepo / Marquee Connectors'",
+          "startPoint": "Sunset Valley Homes (Brgy. Cutcut) / Capaya Terminal",
+          "endPoint": "Nepo Mart Terminal / Marquee Mall Transit Terminal",
+          "roads": [
+            "Fil-Am Friendship Highway",
+            "Porac-Angeles Road",
+            "Pandan-Capaya Road"
+          ],
+          "landmarks": [
+            "Sunset Valley Homes",
+            "Cutcut",
+            "Nepo Quad",
+            "Marquee Mall",
+            "Capaya peripheral barangays"
+          ],
+          "conflictsWithLegend": [
+            "Blog merges the Sunset–Nepo and Capaya/Marquee services into one entry; the legend lists them as separate Orange and Pink routes.",
+            "Blog landmarks differ from the legend (1976, Initial, Champaca, Nepo Mart)."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "villa-pampang",
+      "name": "Villa – Pampang",
+      "sourceLabel": "VILLA - PAMPANG",
+      "sourceSubLabel": "",
+      "jeepneyColorName": "Yellow",
+      "displayColor": "#E0C000",
+      "geometryStatus": "unverified",
+      "description": "",
+      "sourceLandmarks": [
+        "SM Telebestagan",
+        "L&S",
+        "Villa Angela",
+        "Villa Gloria",
+        "Villa Angelina",
+        "Bale Herencia",
+        "HAU",
+        "Holy",
+        "Jenra Mall",
+        "Rizal",
+        "San Nicolas",
+        "Plaridel",
+        "Pamintuan Residence",
+        "Lakandula"
+      ],
+      "labelNotes": [
+        "The legend spells 'Telebestagan'; the area is often written 'Telabastagan'. Preserved as written; verify."
+      ],
+      "source": "route-legend.jpeg",
+      "directions": [],
+      "secondarySources": [
+        {
+          "source": "The Pooch of the Philippines (WordPress blog), text supplied by the project owner; original URL and date unknown",
+          "status": "unverified",
+          "matchToLegend": "Yellow jeepney — 'Villa Pampang – Holy / Downtown'",
+          "startPoint": "Villa Angela / Telabastagan boundary (Super8 area)",
+          "endPoint": "Pampang Public Market Terminal",
+          "roads": [
+            "MacArthur Highway",
+            "Henson Street",
+            "Plaridel Street"
+          ],
+          "landmarks": [
+            "Villa Angela",
+            "Villa Gloria",
+            "Telabastagan junction",
+            "San Nicolas Market",
+            "Nepo Mart area",
+            "Pampang Market"
+          ],
+          "conflictsWithLegend": [
+            "Blog starts at the Villa Angela / Telabastagan boundary; the legend starts at SM Telebestagan.",
+            "Blog title says 'Holy / Downtown'; the legend title says 'Villa - Pampang'."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "capaya-angeles",
+      "name": "Capaya – Angeles",
+      "sourceLabel": "CAPAYA - ANGELES",
+      "sourceSubLabel": "",
+      "jeepneyColorName": "Pink",
+      "displayColor": "#D92991",
+      "geometryStatus": "unverified",
+      "description": "",
+      "sourceLandmarks": [
+        "Citicenter",
+        "Mining",
+        "MacArthur",
+        "Kuliat",
+        "Plaridel"
+      ],
+      "labelNotes": [],
+      "source": "route-legend.jpeg",
+      "directions": [],
+      "secondarySources": [
+        {
+          "source": "The Pooch of the Philippines (WordPress blog), text supplied by the project owner; original URL and date unknown",
+          "status": "unverified",
+          "matchToLegend": "Not listed separately. Possibly the Capaya half of blog entry 11 (Orange / Light Blue).",
+          "startPoint": "Capaya Terminal (as part of blog entry 11)",
+          "endPoint": "Marquee Mall Transit Terminal (as part of blog entry 11)",
+          "roads": [
+            "Pandan-Capaya Road"
+          ],
+          "landmarks": [
+            "Capaya peripheral barangays",
+            "Marquee Mall"
+          ],
+          "conflictsWithLegend": [
+            "The legend lists Capaya – Angeles as a separate Pink route with Citicenter, Mining, MacArthur, Kuliat, Plaridel; the blog does not mention Pink or those landmarks."
+          ]
+        }
+      ]
+    }
+  ],
+  "unmatchedSecondaryRoutes": [
+    {
+      "source": "The Pooch of the Philippines (WordPress blog), text supplied by the project owner; original URL and date unknown",
+      "status": "unverified",
+      "title": "Brown jeepney (Friendship – Check Point)",
+      "startPoint": "Friendship Highway Terminal (Korean Town)",
+      "endPoint": "Check Point / Main Gate Terminal",
+      "roads": [
+        "Fil-Am Friendship Highway",
+        "Don Juico Avenue (Perimeter Road)"
+      ],
+      "landmarks": [
+        "Korean Town",
+        "Anunas",
+        "Fields Avenue",
+        "Balibago commercial strip"
+      ],
+      "conflictsWithLegend": [
+        "No Brown jeepney appears on the legend. It may be the reverse direction of the Sand 'M Gate – Friendship' route, or a different service; verify."
+      ]
+    }
+  ],
+  "secondarySourceWarning": "Blog-derived text is secondary, unverified and contradicts the legend in places (colors, endpoints, route count). It is shown for contributors to check and is never used by the planner."
+}

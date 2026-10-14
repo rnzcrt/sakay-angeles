@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="Prototype jeepney route explorer for Angeles City, Pampanga. Route data is not yet verified." />
+<link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+<title>Sakay Angeles — Jeepney Route Finder (prototype)</title>
+<script type="module" src="/src/main.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#planner">Skip to trip planner</a>
+<header class="topbar">
+  <div class="brand"><div class="brand-mark" aria-hidden="true">↗</div>
+    <div>Sakay Angeles<small>Jeepney route explorer · Angeles City, Pampanga</small></div></div>
+  <div class="top-right"><span class="pill pill-warn">Prototype · route data unverified</span></div>
+</header>
+
+<div id="status-live" class="visually-hidden" role="status" aria-live="polite"></div>
+<div id="alert-banner" class="alert-banner" role="alert" hidden></div>
+
+<main class="layout">
+  <aside class="sidebar" id="sidebar">
+    <p class="eyebrow">Explore first, then plan</p>
+    <h1>Where are you headed?</h1>
+    <div id="data-banner" class="notice" role="status">Loading route data…</div>
+
+    <section id="planner" class="search-card" aria-labelledby="planner-title">
+      <h2 id="planner-title" class="section-title">Plan a trip</h2>
+      <form id="origin-form" class="field" autocomplete="off">
+        <label class="field-label" for="origin">Starting point</label>
+        <div class="field-row">
+          <input id="origin" type="text" inputmode="search" placeholder="Search a place or landmark" />
+          <button type="submit" class="btn btn-secondary">Search</button>
+        </div>
+        <div class="field-actions">
+          <button type="button" class="btn btn-link" id="locate-btn">◎ Use my location</button>
+          <button type="button" class="btn btn-link" data-pick="origin">＋ Pick on map</button>
+        </div>
+        <div id="origin-choices" class="choices-box"></div>
+      </form>
+      <div class="swap-row"><button type="button" class="btn btn-secondary" id="swap-btn" title="Swap start and destination" aria-label="Swap start and destination">⇅ Switch trip</button></div>
+      <form id="dest-form" class="field" autocomplete="off">
+        <label class="field-label" for="destination">Destination</label>
+        <div class="field-row">
+          <input id="destination" type="text" inputmode="search" placeholder="Search a place or landmark" />
+          <button type="submit" class="btn btn-secondary">Search</button>
+        </div>
+        <div class="field-actions">
+          <button type="button" class="btn btn-link" data-pick="destination">＋ Pick on map</button>
+        </div>
+        <div id="destination-choices" class="choices-box"></div>
+      </form>
+      <div class="actions">
+        <button type="button" class="btn btn-primary" id="find-btn">Find jeepney route</button>
+        <button type="button" class="btn btn-ghost" id="clear-trip-btn">Clear trip</button>
+      </div>
+      <p class="hint">Location is requested only when you press “Use my location” and stays in your browser. Search is sent to OpenStreetMap’s Nominatim service only when you press Search.</p>
+    </section>
+
+    <div id="results" aria-live="polite"></div>
+
+    <section aria-labelledby="routes-title">
+      <div class="section-head"><h2 id="routes-title" class="section-title">Jeepney routes</h2><span class="count" id="route-count"></span></div>
+      <div class="route-tools" role="group" aria-label="Route display">
+        <button type="button" class="mini-btn" id="show-all-btn">Show all</button>
+        <button type="button" class="mini-btn" id="hide-all-btn">Hide all</button>
+        <button type="button" class="mini-btn" id="fit-btn">Fit routes</button>
+      </div>
+      <ul class="route-list" id="route-list"></ul>
+      <div id="route-detail"></div>
+    </section>
+
+    <section aria-labelledby="ref-title">
+      <h2 id="ref-title" class="section-title">Reference maps</h2>
+      <p class="muted">The original source maps are the only complete picture of the routes today. Open one to explore.</p>
+      <ul class="ref-list" id="ref-list"></ul>
+    </section>
+
+    <footer class="notice notice-soft">
+      <p id="source-note"></p>
+      <p id="attribution-note"></p>
+      <p><a href="./trace.html">Contributors: open the route tracing tool</a></p>
+    </footer>
+  </aside>
+
+  <section class="map-wrap" aria-label="Map">
+    <div id="map" class="map"></div>
+    <div id="pick-banner" class="pick-banner" role="status" hidden>
+      <span id="pick-text"></span><button type="button" class="btn btn-ghost" id="pick-cancel">Cancel</button>
+    </div>
+    <div class="map-legend" id="map-legend"></div>
+    <div id="map-fallback" class="map-fallback" hidden></div>
+  </section>
+</main>
+</body>
+</html>

@@ -25,16 +25,20 @@ npm run preview
 `npm run dev:lan` exposes the dev server to your network (e.g. to test on a phone). Geolocation needs HTTPS or `localhost`.
 
 ## Route tracing tool
-Open `/trace.html` (also linked from the app footer). Pick a route and a direction (**A** or **B**). **Your first click is the START (the terminal) and your last click is the END** — marked S and E on the map — so there is nothing to type. Click along the road in the order the jeepney travels. **Start over** clears every traced line; from then on the main app shows only the routes you have traced (use *Use the shipped file instead* in the app to go back).
-- **Two directions per route.** Jeepney routes are often one-way circuits whose way back uses different roads, so trace each direction separately. *Copy A reversed to B* gives you a starting point to edit.
-- **Snap to roads** (on by default) routes between your clicks with the public OSRM demo server, which follows one-way streets from OpenStreetMap. It is for light use only; if it is unreachable the tracer falls back to a straight line and tells you. Change the provider in `ROUTING_CONFIG` (`src/config.js`).
-- Drag a point to move it, double-click to delete. Terminal names are optional (under *Optional: add terminal names*) and saved in the export.
-- A route list badge warns **⚠ goes back over itself** when a line retraces the same road (out-and-back), which usually means the return trip needs its own Direction B line.
-- Export GeoJSON and replace `public/data/routes.geojson`. Each feature has `direction` (`a`/`b`) and `oneWay`. Files with no direction info (older exports) are treated as **two-way** lines.
-Drafts autosave in your browser, and **the main app automatically uses the lines you traced in the same browser** (it shows a notice with a *Use the shipped file instead* switch). To share or keep them, export and replace `public/data/routes.geojson`; clearing browser data deletes unsaved drafts. Add `?offline` to either page for a blank basemap (testing).
+Open `/trace.html` (also linked from the app footer). **Each jeepney route has two parts: Route 1 and Route 2.**
+1. Pick a route.
+2. **Route 1 — going.** Your first click is the first terminal (the START). Click along the road to the end. Your last click is the new terminal.
+3. **Route 2 — coming back.** Press **Start Route 2 where Route 1 ends**, click along the road back (it can be a different road), then press **Finish Route 2 at the start of Route 1**. If the way back is the same road, **Copy Route 1 backwards** does it in one click.
+4. The panel checks that Route 2 starts where Route 1 ends and ends where Route 1 starts (✔ / ✖).
+- Traced one long line by mistake? Click the turnaround point and press **Split here**: Route 1 ends there and the rest becomes Route 2.
+- **Snap to roads** (on by default) routes between your clicks with the public OSRM demo server, which follows one-way streets from OpenStreetMap. It is for light use only; if it is unreachable the tracer falls back to a straight line and tells you. Change the provider in `ROUTING_CONFIG` (`src/config.js`). Clicks made while snapping is still working are queued, never dropped.
+- Drag a point to move it, double-click to delete. **Click a point to select it, then *Cut after the selected point*** to throw away everything after it and keep tracing from there.
+- *Start over* clears every traced line; from then on the main app shows only the routes you have traced. Terminal names are optional.
+- Export GeoJSON and replace `public/data/routes.geojson`. Drafts autosave in your browser, and the main app automatically uses the lines you traced in the same browser (with a notice and a *Use the shipped file instead* switch).
+In the app, each part is ridden only in its traced order. When Route 1 and Route 2 join up (Route 1 ends where Route 2 starts and Route 2 ends where Route 1 starts) they are treated as one jeepney going round, so you can stay on board across the turnaround. Add `?offline` to either page for a blank basemap (testing).
 
 ## Switching the trip
-The **⇅ Switch trip** button swaps start and destination and searches again. With one-way lines the way back only uses a line traced for that direction (Direction B), never the same road in reverse.
+The **⇅ Switch trip** button swaps start and destination and searches again. Routes are ridden in their traced order, so a switched trip uses Route 2 for the way back (or rides the jeepney round the loop the long way if that is the only way).
 
 ## Draft suggestions
 Every route has a hand-traced draft line but none has verified stops, so when the verified planner has nothing to offer the app automatically falls back to `src/routing/draftPlanner.js`. It finds traced lines within 500 m of your start and destination, allows one connection where two lines come within 150 m, and ranks results by a **rough estimated time** (assumes ~4.5 km/h walking, ~12 km/h by jeepney and a few minutes' wait per ride; see `DRAFT_TIME` in `src/config.js`). Only the part of each line you would actually ride is drawn on the map, with dotted walking guides. Results are labelled *draft*, treat lines as one-way when they are marked `oneWay` (a closed loop may wrap around) and as two-way otherwise, give no stop names, and are **not** a substitute for verified data. The verified planner itself is unchanged and still refuses unverified data.

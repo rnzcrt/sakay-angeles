@@ -22,11 +22,11 @@
     <div class="notice">Lines you draw here are <b>illustrative drafts</b>. They are shown dashed in the app and are <b>never</b> used for trip suggestions until stops and directions are verified.</div>
 
     <ol class="muted" style="padding-left:18px;margin:0 0 12px">
-      <li>Pick a route, then <b>Direction A</b> or <b>B</b>.</li>
-      <li><b>Your first click is the START</b> (the terminal, e.g. Chevalier) and <b>your last click is the END</b>. Trace along the road in the order the jeepney travels. No typing needed.</li>
-      <li>Click along the road. With <b>Snap to roads</b> on, the path follows the streets (including one-way rules) between your clicks.</li>
-      <li>Drag a point to move it; double-click a point to delete it.</li>
-      <li>If the way back uses a different road, trace it as Direction B.</li>
+      <li>Pick a route.</li>
+      <li><b>Route 1 — going:</b> your first click is the first terminal. Click along the road to the end. <b>The last click is the new terminal</b> — Route 2 starts there.</li>
+      <li><b>Route 2 — coming back:</b> press <b>Start Route 2 where Route 1 ends</b>, click along the road back (it may be a different road), then press <b>Finish Route 2 at the start of Route 1</b>.</li>
+      <li>With <b>Snap to roads</b> on, the path follows the streets (including one-way rules) between your clicks.</li>
+      <li>Drag a point to move it; double-click a point to delete it. <b>Click a point to select it, then “Cut after the selected point”</b> to throw away everything after it and keep tracing from there.</li>
       <li>Press <b>Export</b>, then replace <code>public/data/routes.geojson</code>.</li>
     </ol>
     <label class="draft-toggle"><input type="checkbox" id="snap-toggle" checked> Snap to roads <small>(uses the public OSRM demo server; follows one-way streets; falls back to a straight line if unavailable)</small></label>
@@ -42,13 +42,15 @@
 
     <div id="active-panel" class="card" hidden>
       <h3 class="detail-title" id="active-title"></h3>
-      <div class="actions" role="group" aria-label="Direction">
-        <button type="button" class="btn btn-ghost" id="dir-a" data-dir="a" aria-pressed="true">Direction A</button>
-        <button type="button" class="btn btn-ghost" id="dir-b" data-dir="b" aria-pressed="false">Direction B</button>
+      <div class="actions" role="group" aria-label="Which part of the route">
+        <button type="button" class="btn btn-ghost" id="dir-a" data-dir="a" aria-pressed="true">Route 1 — going</button>
+        <button type="button" class="btn btn-ghost" id="dir-b" data-dir="b" aria-pressed="false">Route 2 — coming back</button>
       </div>
       <p class="muted" id="active-stats"></p>
       <p class="detail-flag" id="active-warning" hidden></p>
-      <label class="draft-toggle"><input type="checkbox" id="twoway-toggle"> This line is ridden both ways <small>(leave off for one-way jeepney routes and loops)</small></label>
+      <ul class="pair-check" id="pair-check" hidden></ul>
+      <p class="muted" id="busy-note" hidden></p>
+      <label class="draft-toggle"><input type="checkbox" id="twoway-toggle"> Jeepneys also ride this line backwards <small>(leave OFF — jeepneys follow each route in the order you traced it)</small></label>
       <p class="muted" id="active-hint"></p>
       <details class="optional-names"><summary>Optional: add terminal names</summary>
         <div class="field"><label class="field-label" for="start-name">Start terminal name</label><input id="start-name" type="text" placeholder="optional" /></div>
@@ -56,12 +58,18 @@
       </details>
       <p class="muted" id="active-landmarks"></p>
       <div class="actions">
+        <button type="button" class="btn btn-ghost" id="cut-btn" hidden>✂ Cut after the selected point</button>
         <button type="button" class="btn btn-ghost" id="undo-btn">Undo last point</button>
-        <button type="button" class="btn btn-ghost" id="clear-btn">Clear this direction</button>
+        <button type="button" class="btn btn-ghost" id="clear-btn">Clear this route</button>
       </div>
       <div class="actions">
+        <button type="button" class="btn btn-primary" id="start-r2-btn" hidden>Start Route 2 where Route 1 ends</button>
+        <button type="button" class="btn btn-primary" id="close-loop-btn" hidden>Finish Route 2 at the start of Route 1</button>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn btn-ghost" id="copy-return-btn" hidden>Copy Route 1 backwards (same road back)</button>
+        <button type="button" class="btn btn-ghost" id="split-btn" hidden>Split here</button>
         <button type="button" class="btn btn-ghost" id="reverse-btn">Reverse order</button>
-        <button type="button" class="btn btn-ghost" id="copy-return-btn">Copy A reversed to B</button>
       </div>
     </div>
 

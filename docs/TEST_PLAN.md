@@ -52,10 +52,21 @@ Test at 360, 390, 768, 1024 px and a wide desktop; Chrome/Edge, Firefox and Safa
 - [ ] Undo / Clear / Reverse work; reload the page and the drafts are still there.
 - [ ] Export downloads `routes.geojson`; after replacing `public/data/routes.geojson` the main app draws the line dashed and still says "No verified route yet" for trips.
 - [ ] Import of a previously exported file restores the lines.
-- [ ] Direction A/B: tracing B does not alter A; *Copy A reversed to B* creates an editable B; terminal names survive export/import.
+- [ ] Optional terminal names survive export/import.
 - [ ] Snap to roads follows streets and respects one-way streets; with networking blocked it falls back to a straight line with a message.
 - [ ] Out-and-back lines show the ⚠ badge and warning; a true loop shows the loop note.
 - [ ] In the main app, a one-way line is not suggested for the opposite direction (unless it is a closed loop).
+
+### Route 1 and Route 2
+- [ ] Trace Route 1, then *Start Route 2 where Route 1 ends* puts Route 2's first point exactly on Route 1's last point.
+- [ ] *Finish Route 2 at the start of Route 1* ends Route 2 on Route 1's first point; the panel shows ✔ ✔.
+- [ ] *Copy Route 1 backwards* creates Route 2 on the same road; cut and re-trace where the way back differs.
+- [ ] A single long line that returns to its start shows a warning; selecting the turnaround point and pressing *Split here* makes Route 1 and Route 2.
+- [ ] In the main app, Route 1 + Route 2 that join up appear as one jeepney loop; the switched trip uses Route 2 for the way back.
+
+### Editing a route
+- [ ] Click six points quickly: all six are recorded (the panel shows a working note while snapping).
+- [ ] Select a point → *Cut after the selected point* removes the later points; new clicks continue from there.
 
 ### Start / end tracing
 - [ ] First click shows an **S** marker and the hint says it is the start; the last point shows **E**; no typing is required.
@@ -64,7 +75,7 @@ Test at 360, 390, 768, 1024 px and a wide desktop; Chrome/Edge, Firefox and Safa
 ### Switch trip and local drafts
 - [ ] After tracing in `/trace.html`, reload the main app: the notice lists the routes taken from the tracer and the map shows the new lines.
 - [ ] *Use the shipped file instead* reverts and *Use my traced lines* restores them.
-- [ ] ⇅ Switch trip swaps the fields and markers and re-runs the search; with Direction A/B traced, the way back uses Direction B.
+- [ ] ⇅ Switch trip swaps the fields and markers and re-runs the search; on a loop route the switched trip rides the loop in its traced order (often the longer way round).
 - [ ] Lines traced as “both ways” show the “Check the way back” warning.
 
 ### Accessibility

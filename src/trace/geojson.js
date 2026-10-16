@@ -10,7 +10,7 @@ import { isValidLngLat, haversineMeters, pathLengthMeters } from '../routing/geo
 import { validateDataset } from '../data/validate.js';
 
 export const DIRECTIONS = ['a', 'b'];
-export const directionLabel = (d) => (d === 'b' ? 'Direction B' : 'Direction A');
+export const directionLabel = (d) => (d === 'b' ? 'Route 2 (coming back)' : 'Route 1 (going)');
 export const lineKey = (routeId, dir) => `${routeId}|${dir}`;
 export const splitKey = (key) => { const i = key.lastIndexOf('|'); return [key.slice(0, i), key.slice(i + 1)]; };
 export const geometryIdFor = (routeId, dir) => `${routeId}-${dir}-draft`;
@@ -136,4 +136,29 @@ export function analyzeLine(coords, { stepM = 40, nearM = 35, minGapM = 300 } = 
 /** Validate an export against the route list before the user saves it. */
 export function validateDraftExport(geojson, routes) {
   return validateDataset({ routes, stops: [], transfers: [], geojson });
+}
+
+/**
+ * Does Route 2 really run back from where Route 1 ends to where Route 1 starts?
+ * Route 2's first point should be at Route 1's last point; its last point at Route 1's first point.
+ */
+export function checkDirectionPair(lineA, lineB, toleranceM = 150) {
+  const a = pathOf(lineA);
+  const b = pathOf(lineB);
+  if (a.length < 2 || b.length < 2) return null;
+  const startGapM = Math.round(haversineMeters(b[0], a.at(-1)));
+  const endGapM = Math.round(haversineMeters(b.at(-1), a[0]));
+  const bStartsAtAEnd = startGapM <= toleranceM;
+  const bEndsAtAStart = endGapM <= toleranceM;
+  return { startGapM, endGapM, bStartsAtAEnd, bEndsAtAStart, ok: bStartsAtAEnd && bEndsAtAStart };
+}
+
+/** Split one line at waypoint `i`: the first part ends there, the second part starts there. */
+export function splitLineAt(line, i) {
+  const wp = line.waypoints;
+  const keep = (extra) => ({ oneWay: true, startName: '', endName: '', ...extra });
+  return [
+    keep({ waypoints: wp.slice(0, i + 1), segments: line.segments.slice(0, i), startName: line.startName ?? '' }),
+    keep({ waypoints: wp.slice(i), segments: line.segments.slice(i), endName: line.startName ?? '' }),
+  ];
 }

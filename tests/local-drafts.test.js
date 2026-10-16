@@ -26,28 +26,33 @@ test('without saved tracer lines the shipped data is used unchanged', () => {
 
 test('saved tracer lines replace the shipped lines for those routes only', () => {
   const a = lineFromCoords([[0, 0.01], [0.05, 0.01]], { oneWay: true });
-  const b = lineFromCoords([[0.05, 0.012], [0, 0.012]], { oneWay: true });
-  const store = memory({ [LOCAL_KEY]: saved([[lineKey('r1', 'a'), a], [lineKey('r1', 'b'), b]]) });
+  const store = memory({ [LOCAL_KEY]: saved([[lineKey('r1', 'a'), a]]) });
   const r = mergeLocalDrafts(shipped, store);
   assert.deepEqual(r.used, ['Route 1']);
   const f1 = r.data.geojson.features.filter((f) => f.properties.routeId === 'r1');
-  assert.equal(f1.length, 2);
-  assert.ok(f1.every((f) => f.properties.oneWay === true));
+  assert.equal(f1.length, 1);
+  assert.equal(f1[0].properties.oneWay, true);
   assert.equal(f1[0].geometry.coordinates[0][1], 0.01); // not the shipped 0 latitude
   assert.equal(r.data.geojson.features.filter((f) => f.properties.routeId === 'r2').length, 1); // untouched
 });
 
-test('the merged data drives one-way direction rules end to end', () => {
-  const a = lineFromCoords([[0, 0.01], [0.05, 0.01]], { oneWay: true });
-  const b = lineFromCoords([[0.05, 0.013], [0, 0.013]], { oneWay: true });
-  const merged = mergeLocalDrafts(shipped, memory({ [LOCAL_KEY]: saved([[lineKey('r1', 'a'), a], [lineKey('r1', 'b'), b]]) }));
+test('a saved loop (out one road, back another) is ridden in traced order; switching the trip rides it the long way', () => {
+  // out along y=0.01 from west to east, back along y=0.025 (~1.7 km away) from east to west, closed at the start
+  const loop = lineFromCoords([[0, 0.01], [0.05, 0.01], [0.05, 0.025], [0, 0.025], [0, 0.0101]], { oneWay: true });
+  const merged = mergeLocalDrafts(shipped, memory({ [LOCAL_KEY]: saved([[lineKey('r1', 'a'), loop]]) }));
   const lines = buildDraftLines(merged.data.geojson, routes);
-  const fwd = planDraftTrip({ origin: [0.005, 0.0102], destination: [0.045, 0.0102], lines });
-  assert.equal(fwd.itineraries[0].legs[0].directionLabel, 'Direction A');
-  // switching the trip must use the return road (Direction B), not the same road back
-  const back = planDraftTrip({ origin: [0.045, 0.0132], destination: [0.005, 0.0132], lines });
-  assert.equal(back.itineraries[0].legs[0].directionLabel, 'Direction B');
+  assert.equal(lines.find((l) => l.route.id === 'r1').isLoop, true);
+  const out = planDraftTrip({ origin: [0.005, 0.0102], destination: [0.045, 0.0102], lines });
+  assert.equal(out.itineraries[0].legs[0].directionLabel, 'loop route');
+  const outKm = out.itineraries[0].approxRideMeters;
+  // the way back on the return road is ridden along the return pass
+  const back = planDraftTrip({ origin: [0.045, 0.0252], destination: [0.005, 0.0252], lines });
+  assert.equal(back.status, 'draft_success');
   assert.ok(back.itineraries[0].accessWalkMeters < 100);
+  // going "backwards" on the OUT road means riding the loop the long way round
+  const wrong = planDraftTrip({ origin: [0.045, 0.0102], destination: [0.005, 0.0102], lines });
+  assert.equal(wrong.status, 'draft_success');
+  assert.ok(wrong.itineraries[0].approxRideMeters > outKm * 1.5);
 });
 
 test('the ignore switch, corrupt storage and invalid saved data are handled', () => {

@@ -107,6 +107,20 @@ export function buildDraftLines(geojson, routes, step = DRAFT_DEFAULTS.densifyMe
     g.coords.push(...coords);
     groups.set(key, g);
   }
+  // Route 1 + Route 2 that join up (Route 1 ends where Route 2 starts, and Route 2 ends where Route 1
+  // starts) are the same jeepney going round, so riders may stay on board across the turnaround:
+  // treat them as one closed loop.
+  const near = (p, q) => haversineMeters(p, q) <= 150;
+  for (const id of new Set([...groups.values()].map((g) => g.routeId))) {
+    const a = groups.get(`${id}|a`);
+    const b = groups.get(`${id}|b`);
+    if (a && b && near(a.coords.at(-1), b.coords[0]) && near(b.coords.at(-1), a.coords[0])) {
+      const weld = haversineMeters(a.coords.at(-1), b.coords[0]) <= 30;
+      groups.delete(`${id}|a`);
+      groups.delete(`${id}|b`);
+      groups.set(`${id}|loop`, { routeId: id, direction: 'loop', oneWay: true, startName: a.startName, endName: a.startName, coords: [...a.coords, ...(weld ? b.coords.slice(1) : b.coords)] });
+    }
+  }
   const byId = new Map(routes.map((r) => [r.id, r]));
   const entries = [];
   for (const g of groups.values()) {
@@ -114,15 +128,20 @@ export function buildDraftLines(geojson, routes, step = DRAFT_DEFAULTS.densifyMe
     if (!route) continue;
     const line = prepareLine(g.coords, step);
     const oneWay = g.oneWay;
+    const closes = oneWay && haversineMeters(line.pts[0], line.pts.at(-1)) <= 150;
+    const label = g.direction === 'legacy' ? 'traced both ways'
+      : g.direction === 'loop' ? 'Route 1 + Route 2 (one loop)'
+      : closes ? 'loop route'
+      : g.direction === 'b' ? 'Route 2 (coming back)' : 'Route 1 (going)';
     entries.push({
       route,
       line,
       oneWay,
       direction: g.direction,
-      directionLabel: g.direction === 'legacy' ? 'traced both ways' : `Direction ${g.direction.toUpperCase()}`,
+      directionLabel: label,
       startName: g.startName,
       endName: g.endName,
-      isLoop: oneWay && haversineMeters(line.pts[0], line.pts.at(-1)) <= 150,
+      isLoop: closes,
     });
   }
   return entries.sort((a, b) => routes.indexOf(a.route) - routes.indexOf(b.route) || a.direction.localeCompare(b.direction));
@@ -148,6 +167,7 @@ const makeLeg = (entry, from, to) => ({
   displayColor: entry.route.displayColor,
   directionLabel: entry.directionLabel,
   oneWay: entry.oneWay,
+  isLoop: entry.isLoop,
   boardPoint: from.point,
   alightPoint: to.point,
   rideMeters: rideMeters(entry, from, to),

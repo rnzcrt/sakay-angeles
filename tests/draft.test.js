@@ -117,14 +117,14 @@ test('a one-way line is only ridden in its traced direction', () => {
   assert.equal(back.status, DRAFT_STATUS.NONE);
 });
 
-test('a separately traced Direction B makes the way back possible, on its own road', () => {
+test('a separately traced Route 2 makes the way back possible, on its own road', () => {
   const both = buildDraftLines({ features: [
     dirFeat('H', 'a', [[0, 0], [0.05, 0]]),
     dirFeat('H', 'b', [[0.05, 0.003], [0, 0.003]]), // the return uses a different road ~330 m north
   ] }, routes);
   const back = planDraftTrip({ origin: [0.045, 0.0032], destination: [0.005, 0.0032], lines: both });
   assert.equal(back.status, DRAFT_STATUS.SUCCESS);
-  assert.equal(back.itineraries[0].legs[0].directionLabel, 'Direction B');
+  assert.equal(back.itineraries[0].legs[0].directionLabel, 'Route 2 (coming back)');
   // walking to the A road (330 m away) would also be possible but B must be the better match here
   assert.ok(back.itineraries[0].accessWalkMeters < 100);
 });
@@ -151,4 +151,27 @@ test('two directions of the same route are never chained as a transfer', () => {
   const both = buildDraftLines({ features: [dirFeat('H', 'a', [[0, 0], [0.03, 0]]), dirFeat('H', 'b', [[0.03, 0.0002], [0.06, 0.0002]])] }, routes);
   const r = planDraftTrip({ origin: [0.005, 0.0005], destination: [0.055, 0.0005], lines: both });
   assert.equal(r.status, DRAFT_STATUS.NONE);
+});
+
+
+test('Route 1 + Route 2 that join up are one jeepney loop: you can stay on board across the turnaround', () => {
+  const R1 = dirFeat('H', 'a', [[0, 0], [0.05, 0]]);                 // going
+  const R2 = dirFeat('H', 'b', [[0.05, 0], [0.05, 0.02], [0, 0.02], [0, 0.0002]]); // coming back by another road, ends at the start
+  const lines = buildDraftLines({ features: [R1, R2] }, routes);
+  assert.equal(lines.filter((l) => l.route.id === 'H').length, 1);
+  assert.equal(lines[0].directionLabel, 'Route 1 + Route 2 (one loop)');
+  assert.equal(lines[0].isLoop, true);
+  // board near the end of Route 1, get off on the way back (Route 2): possible without changing jeepney
+  const r = planDraftTrip({ origin: [0.045, 0.0002], destination: [0.02, 0.0202], lines });
+  assert.equal(r.status, DRAFT_STATUS.SUCCESS);
+  assert.equal(r.itineraries[0].transfers, 0);
+  // and the way back is only ridden in its own direction
+  const wrong = planDraftTrip({ origin: [0.02, 0.0202], destination: [0.045, 0.0002], lines });
+  assert.equal(wrong.status, DRAFT_STATUS.SUCCESS);
+  assert.ok(wrong.itineraries[0].approxRideMeters > r.itineraries[0].approxRideMeters);
+});
+
+test('Route 1 and Route 2 that do not join up stay separate one-way lines', () => {
+  const lines = buildDraftLines({ features: [dirFeat('H', 'a', [[0, 0], [0.05, 0]]), dirFeat('H', 'b', [[0.08, 0.02], [0.03, 0.02]])] }, routes);
+  assert.equal(lines.filter((l) => l.route.id === 'H').length, 2);
 });

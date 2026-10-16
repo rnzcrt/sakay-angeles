@@ -98,3 +98,40 @@ test('analyzeLine reports when start and end are the same place (round trip vs l
   assert.equal(oneWayLine.sameStartEnd, false);
   assert.ok(oneWayLine.startEndMeters > 4000);
 });
+
+import { checkDirectionPair } from '../src/trace/geojson.js';
+
+test('checkDirectionPair: B must start where A ends and end where A starts', () => {
+  const A = lineFromCoords([[0, 0], [0.02, 0], [0.04, 0]], { oneWay: true });
+  const goodB = lineFromCoords([[0.04, 0.001], [0.02, 0.003], [0, 0.0005]], { oneWay: true });
+  const good = checkDirectionPair(A, goodB);
+  assert.equal(good.ok, true);
+  // B that begins at A's start and runs out and back (a round trip): both checks fail
+  const roundTripB = lineFromCoords([[0, 0], [0.04, 0], [0, 0.0002]], { oneWay: true });
+  const bad = checkDirectionPair(A, roundTripB);
+  assert.equal(bad.bStartsAtAEnd, false);
+  assert.ok(bad.startGapM > 4000);
+  assert.equal(bad.bEndsAtAStart, true);
+  assert.equal(bad.ok, false);
+  assert.equal(checkDirectionPair(A, lineFromCoords([[0, 0]])), null);
+});
+
+import { splitLineAt } from '../src/trace/geojson.js';
+
+test('splitLineAt: Route 1 ends at the chosen point and Route 2 starts there', () => {
+  const l = {
+    waypoints: [[0, 0], [0.02, 0], [0.04, 0], [0.02, 0.003], [0, 0]],
+    segments: [[[0, 0], [0.01, 0], [0.02, 0]], [[0.02, 0], [0.04, 0]], [[0.04, 0], [0.02, 0.003]], [[0.02, 0.003], [0, 0]]],
+    oneWay: true, startName: 'Start', endName: '',
+  };
+  const [one, two] = splitLineAt(l, 2);
+  assert.deepEqual(one.waypoints, [[0, 0], [0.02, 0], [0.04, 0]]);
+  assert.equal(one.segments.length, 2);
+  assert.deepEqual(two.waypoints, [[0.04, 0], [0.02, 0.003], [0, 0]]);
+  assert.equal(two.segments.length, 2);
+  assert.deepEqual(pathOf(one).at(-1), pathOf(two)[0]);
+  assert.equal(checkDirectionPair(one, two).ok, true);
+  assert.equal(one.startName, 'Start');
+  assert.equal(two.endName, 'Start');
+  assert.equal(one.oneWay && two.oneWay, true);
+});

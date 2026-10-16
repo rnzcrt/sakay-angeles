@@ -1,6 +1,7 @@
 import './styles.css';
 import { loadData } from './data/loadData.js';
 import { createMap, maplibregl } from './map/createMap.js';
+import { haversineMeters } from './routing/geo.js';
 import { searchPlaces } from './services/geocoding.js';
 import { snapSegment } from './services/routing.js';
 import { setReplaceShipped } from './data/localDrafts.js';
@@ -11,7 +12,7 @@ import { escapeHtml } from './ui/html.js';
 import { enrichFeatures } from './map/routeLayers.js';
 import {
   DIRECTIONS, directionLabel, lineKey, emptyLine, pathOf, lineFromCoords, geojsonToLines, linesToGeoJson,
-  lengthKm, analyzeLine, validateDraftExport,
+  lengthKm, analyzeLine, validateDraftExport, checkDirectionPair, splitLineAt,
 } from './trace/geojson.js';
 
 const $ = (id) => document.getElementById(id);
@@ -19,7 +20,7 @@ const notify = createNotifier({ statusEl: $('status-live'), alertEl: $('alert-ba
 const STORE_KEY = 'sakay-angeles-trace-drafts-v2';
 const OLD_KEY = 'sakay-angeles-trace-drafts-v1';
 
-const state = { routes: [], lines: new Map(), active: null, dir: 'a', map: null, ready: false, markers: [], choices: [], busy: false };
+const state = { routes: [], lines: new Map(), active: null, dir: 'a', map: null, ready: false, markers: [], choices: [], pending: 0, selected: null };
 
 renderReferenceMaps($('ref-list'));
 
@@ -55,26 +56,37 @@ async function makeSegment(a, b) {
   return [a, b];
 }
 
-async function withBusy(fn) {
-  if (state.busy) return;
-  state.busy = true;
-  $('map').style.opacity = '0.85';
-  try { await fn(); } finally { state.busy = false; $('map').style.opacity = ''; }
+// Edits run one after another in the order they were made. (Road snapping takes a moment;
+// clicks made meanwhile are queued, never dropped.)
+let queue = Promise.resolve();
+function enqueue(fn) {
+  state.pending += 1;
+  updateBusy();
+  const run = async () => {
+    try { await fn(); } finally { state.pending -= 1; updateBusy(); }
+  };
+  queue = queue.then(run, run);
+  return queue;
+}
+function updateBusy() {
+  const note = $('busy-note');
+  if (!note) return;
+  note.hidden = state.pending === 0;
+  note.textContent = state.pending ? `Working… ${state.pending} edit${state.pending === 1 ? '' : 's'} in progress (snapping to roads). Keep clicking — nothing is lost.` : '';
 }
 
 // ---- rendering ----
 function renderList() {
   $('trace-list').innerHTML = state.routes.map((r) => {
     const sel = r.id === state.active;
-    const parts = DIRECTIONS.map((d) => {
-      const l = state.lines.get(lineKey(r.id, d));
-      const n = l ? pathOf(l).length : 0;
-      return n >= 2 ? `${d.toUpperCase()}: ${lengthKm(pathOf(l)).toFixed(1)} km` : null;
-    }).filter(Boolean);
-    const warn = routeLines(r.id).some((l) => analyzeLine(pathOf(l)).retraced);
+    const km = (d) => { const l = state.lines.get(lineKey(r.id, d)); const p = l ? pathOf(l) : []; return p.length >= 2 ? lengthKm(p).toFixed(1) : null; };
+    const k1 = km('a');
+    const k2 = km('b');
+    const status = !k1 && !k2 ? 'not traced'
+      : [k1 ? `Route 1: ${k1} km` : 'Route 1 not traced', k2 ? `Route 2: ${k2} km` : 'Route 2 not traced yet'].join(' · ');
     return `<li class="route-item${sel ? ' is-selected' : ''}"><button type="button" class="route-select" style="padding-left:10px" data-route="${escapeHtml(r.id)}" aria-pressed="${sel}">
       <span class="route-swatch" style="background:${escapeHtml(r.displayColor)}" aria-hidden="true"></span>
-      <span class="route-copy"><strong>${escapeHtml(r.name)}</strong><span>${escapeHtml(r.jeepneyColorName)} jeepney · ${parts.length ? parts.join(' · ') : 'not traced'}${warn ? ' · ⚠ goes back over itself' : ''}</span></span></button></li>`;
+      <span class="route-copy"><strong>${escapeHtml(r.name)}</strong><span>${escapeHtml(r.jeepneyColorName)} jeepney · ${status}</span></span></button></li>`;
   }).join('');
   const traced = state.routes.filter((r) => routeLines(r.id).some((l) => pathOf(l).length >= 2)).length;
   $('trace-count').textContent = `${traced}/${state.routes.length} traced`;
@@ -86,31 +98,54 @@ function renderActive() {
   if (!r) return;
   const line = getLine();
   const path = line ? pathOf(line) : [];
-  $('active-title').innerHTML = `<span class="route-swatch" style="background:${escapeHtml(r.displayColor)};height:20px" aria-hidden="true"></span> ${escapeHtml(r.name)} — ${directionLabel(state.dir)}`;
+  const one = state.lines.get(lineKey(r.id, 'a'));
+  const two = state.lines.get(lineKey(r.id, 'b'));
+  const has1 = Boolean(one && one.waypoints.length >= 2);
+  $('active-title').innerHTML = `<span class="route-swatch" style="background:${escapeHtml(r.displayColor)};height:20px" aria-hidden="true"></span> ${escapeHtml(r.name)} — ${state.dir === 'b' ? 'Route 2 (coming back)' : 'Route 1 (going)'}`;
   for (const d of DIRECTIONS) $(`dir-${d}`).setAttribute('aria-pressed', String(d === state.dir));
   const n = line?.waypoints.length ?? 0;
   $('active-stats').textContent = `${n} point${n === 1 ? '' : 's'} · about ${lengthKm(path).toFixed(2)} km.`;
-  $('active-hint').textContent = n === 0
-    ? 'Click the map where this route STARTS (the terminal). That first point is the start.'
-    : n === 1
-      ? 'Start placed (S). Now click along the road in the order the jeepney travels.'
-      : 'Keep clicking along the road. Your last point (E) is the END of the route.';
+  if (state.dir === 'a') {
+    $('active-hint').textContent = n === 0
+      ? 'Click the map where Route 1 STARTS (the first terminal). That first click is the start.'
+      : 'Click along the road to the END of Route 1. Your last click is the new terminal — Route 2 starts there.';
+  } else if (!has1) {
+    $('active-hint').textContent = 'Trace Route 1 first (press “Route 1 — going”). Route 2 starts where Route 1 ends.';
+  } else if (n === 0) {
+    $('active-hint').textContent = 'Press “Start Route 2 where Route 1 ends”, then click along the road back.';
+  } else {
+    $('active-hint').textContent = 'Keep clicking along the way back (it can be a different road). When you reach the start terminal, press “Finish Route 2 at the start of Route 1”.';
+  }
   $('twoway-toggle').checked = line ? !line.oneWay : false;
   $('start-name').value = line?.startName ?? '';
   $('end-name').value = line?.endName ?? '';
+  // buttons that only make sense on Route 2 / Route 1
+  const onTwo = state.dir === 'b';
+  $('start-r2-btn').hidden = !(onTwo && has1 && n === 0);
+  $('close-loop-btn').hidden = !(onTwo && has1 && n >= 1);
+  $('copy-return-btn').hidden = !(onTwo && has1);
+  // warnings
   const a = path.length >= 2 ? analyzeLine(path) : null;
   const warn = $('active-warning');
-  if (a?.retraced && a.sameStartEnd) {
+  if (state.dir === 'a' && a?.sameStartEnd && n >= 3) {
     warn.hidden = false;
-    warn.textContent = '⚠ This is a ROUND TRIP in one line: it starts and ends at the same place and goes back over the same road. A direction should go from the START terminal to the END terminal. Split it: trace only the way out as Direction A, then press “Copy A reversed to B” and edit B where the way back uses different roads.';
-  } else if (a?.retraced) {
+    warn.textContent = '⚠ This line comes back to where it started, so it holds the WHOLE round trip. Route 1 should stop at the far terminal. Click the point where the jeepney turns around (the far end), then press “Split here” — the way back becomes Route 2.';
+  } else if (state.dir === 'b' && a && has1 && a.retraced && !checkDirectionPair(one, line)?.ok) {
     warn.hidden = false;
-    warn.textContent = `⚠ About ${Math.round(a.retraceRatio * 100)}% of this line goes back over the same road. If the trip back uses a different road, trace it as the other direction (use “Copy A reversed to B”, then fix the differences).`;
-  } else if (a?.closesLoop && line.oneWay) {
-    warn.hidden = false;
-    warn.textContent = 'This line closes into a loop (start and end at the same place by different roads) and is treated as a one-way circuit.';
+    warn.textContent = '⚠ Part of Route 2 goes back over the same road. That is fine only if the jeepney really returns by the same road.';
   } else warn.hidden = true;
+  // Route 2 must start where Route 1 ends and end where Route 1 starts
+  const pairEl = $('pair-check');
+  const pair = one && two ? checkDirectionPair(one, two) : null;
+  pairEl.hidden = !pair;
+  if (pair) {
+    pairEl.innerHTML = [
+      pair.bStartsAtAEnd ? '<li class="pair-ok">✔ Route 2 starts where Route 1 ends.</li>' : `<li class="pair-bad">✖ Route 2 starts ${pair.startGapM} m away from where Route 1 ends. Its first click should be at Route 1’s last point.</li>`,
+      pair.bEndsAtAStart ? '<li class="pair-ok">✔ Route 2 ends where Route 1 starts.</li>' : `<li class="pair-bad">✖ Route 2 ends ${pair.endGapM} m away from where Route 1 starts. Its last click should be at Route 1’s first point.</li>`,
+    ].join('');
+  }
   $('active-landmarks').textContent = `Legend landmarks (unordered guidance): ${(r.sourceLandmarks ?? []).join(' · ')}`;
+  renderCut();
 }
 
 function syncMap() {
@@ -138,15 +173,37 @@ function renderMarkers() {
     el.style.setProperty('--vc', r.displayColor);
     const overlapsStart = i === n - 1 && n > 1 && analyzeLine(pathOf(line)).sameStartEnd && i > 0;
     const m = new maplibregl.Marker({ element: el, draggable: true, offset: overlapsStart ? [20, -20] : [0, 0] }).setLngLat(c).addTo(state.map);
-    m.on('dragend', () => { const ll = m.getLngLat(); withBusy(() => moveWaypoint(i, [ll.lng, ll.lat])); });
+    m.on('dragend', () => { const ll = m.getLngLat(); enqueue(() => moveWaypoint(i, [ll.lng, ll.lat])); });
     // Keep clicks on a vertex from reaching the map (which would add a new point).
-    el.addEventListener('click', (e) => e.stopPropagation());
-    el.addEventListener('dblclick', (e) => { e.stopPropagation(); withBusy(() => deleteWaypoint(i)); });
+    if (state.selected === i) el.classList.add('vertex-selected');
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.selected = state.selected === i ? null : i;
+      renderMarkers();
+      renderCut();
+    });
+    el.addEventListener('dblclick', (e) => { e.stopPropagation(); enqueue(() => deleteWaypoint(i)); });
     state.markers.push(m);
   });
 }
 
+function renderCut() {
+  const line = getLine();
+  const btn = $('cut-btn');
+  const split = $('split-btn');
+  const i = state.selected;
+  const last = line ? line.waypoints.length - 1 : -1;
+  const ok = line && i !== null && i < last;
+  btn.hidden = !ok;
+  if (ok) btn.textContent = `✂ Cut after point ${i + 1} (remove ${last - i} point${last - i === 1 ? '' : 's'})`;
+  const canSplit = ok && state.dir === 'a' && i > 0;
+  split.hidden = !canSplit;
+  if (canSplit) split.textContent = `Split here: Route 1 ends at point ${i + 1}, the rest becomes Route 2`;
+}
+
 function commit() {
+  state.selected = null;
+  renderCut();
   saveLocal();
   renderList();
   renderActive();
@@ -208,14 +265,74 @@ function selectRoute(id) {
     path.forEach((p) => b.extend(p));
     state.map.fitBounds(b, { padding: 60, maxZoom: 16 });
   }
-  notify.status(`Tracing ${r.name}, ${directionLabel(state.dir)}. Click the map where it starts.`);
+  notify.status(`Tracing ${r.name}, ${directionLabel(state.dir)}.`);
   commit();
 }
 
 function bind() {
   $('trace-list').addEventListener('click', (e) => { const b = e.target.closest('[data-route]'); if (b) selectRoute(b.dataset.route); });
-  document.querySelectorAll('[data-dir]').forEach((b) => b.addEventListener('click', () => { state.dir = b.dataset.dir; selectRoute(state.active); }));
-  $('undo-btn').onclick = () => withBusy(async () => { const l = getLine(); if (l?.waypoints.length) await deleteWaypoint(l.waypoints.length - 1); });
+  document.querySelectorAll('[data-dir]').forEach((b) => b.addEventListener('click', () => { state.dir = b.dataset.dir; state.selected = null; selectRoute(state.active); }));
+  $('start-r2-btn').onclick = () => enqueue(async () => {
+    const one = state.lines.get(lineKey(state.active, 'a'));
+    if (!one || one.waypoints.length < 2) { notify.alert('Trace Route 1 first.'); return; }
+    const line = getLine(true);
+    const end = one.waypoints.at(-1);
+    line.waypoints = [[end[0], end[1]]];
+    line.segments = [];
+    line.oneWay = true;
+    notify.status('Route 2 starts where Route 1 ends. Now click along the road back.');
+    commit();
+  });
+  $('close-loop-btn').onclick = () => enqueue(async () => {
+    const one = state.lines.get(lineKey(state.active, 'a'));
+    const line = getLine();
+    if (!one || one.waypoints.length < 2 || !line || line.waypoints.length < 1) { notify.alert('Trace Route 1, then start Route 2, before finishing it.'); return; }
+    const first = one.waypoints[0];
+    if (haversineMeters(line.waypoints.at(-1), first) < 20) { notify.status('Route 2 already ends at the start of Route 1.'); return; }
+    line.segments.push(await makeSegment(line.waypoints.at(-1), first));
+    line.waypoints.push([first[0], first[1]]);
+    notify.status('Route 2 now ends at the start of Route 1.');
+    commit();
+  });
+  $('copy-return-btn').onclick = () => {
+    const r = activeRoute();
+    const a = r && state.lines.get(lineKey(r.id, 'a'));
+    if (!a || a.waypoints.length < 2) { notify.alert('Trace Route 1 first.'); return; }
+    if (state.lines.get(lineKey(r.id, 'b'))?.waypoints.length && !confirm('Route 2 already has points. Replace them with Route 1 backwards?')) return;
+    const b = JSON.parse(JSON.stringify(a));
+    reverseLine(b);
+    a.oneWay = true;
+    b.oneWay = true;
+    b.startName = a.endName;
+    b.endName = a.startName;
+    state.lines.set(lineKey(r.id, 'b'), b);
+    state.dir = 'b';
+    notify.status('Route 2 is now Route 1 backwards (same road back). Where the way back uses a different road: click that point, press “Cut after the selected point”, then click along the real road to the start.');
+    commit();
+  };
+  $('split-btn').onclick = () => {
+    const r = activeRoute();
+    const line = getLine();
+    const i = state.selected;
+    if (!r || !line || i === null || i < 1 || i >= line.waypoints.length - 1) return;
+    if (state.lines.get(lineKey(r.id, 'b'))?.waypoints.length && !confirm('Route 2 already has points. Replace them with the second part of this line?')) return;
+    const [first, second] = splitLineAt(line, i);
+    state.lines.set(lineKey(r.id, 'a'), first);
+    state.lines.set(lineKey(r.id, 'b'), second);
+    state.dir = 'a';
+    notify.status('Split. Route 1 now ends at that point and Route 2 starts there.');
+    commit();
+  };
+  $('cut-btn').onclick = () => {
+    const line = getLine();
+    const i = state.selected;
+    if (!line || i === null) return;
+    line.waypoints.length = i + 1;
+    line.segments.length = i;
+    notify.status('Cut. Now click along the new road from the selected point.');
+    commit();
+  };
+  $('undo-btn').onclick = () => enqueue(async () => { const l = getLine(); if (l?.waypoints.length) await deleteWaypoint(l.waypoints.length - 1); });
   $('clear-btn').onclick = () => {
     const r = activeRoute();
     if (r && getLine()?.waypoints.length && confirm(`Clear ${directionLabel(state.dir)} of ${r.name}?`)) { state.lines.delete(keyNow()); commit(); }
@@ -229,23 +346,6 @@ function bind() {
     commit();
   };
   $('reverse-btn').onclick = () => { const l = getLine(); if (l) { reverseLine(l); commit(); } };
-  $('copy-return-btn').onclick = () => {
-    const r = activeRoute();
-    const a = r && state.lines.get(lineKey(r.id, 'a'));
-    if (!a || a.waypoints.length < 2) { notify.alert('Trace Direction A first, then copy it reversed to B.'); return; }
-    if (state.lines.get(lineKey(r.id, 'b'))?.waypoints.length && !confirm('Direction B already has points. Replace them?')) return;
-    const b = JSON.parse(JSON.stringify(a));
-    reverseLine(b);
-    // Two separate directions means each one is ridden one way only.
-    a.oneWay = true;
-    b.oneWay = true;
-    b.startName = a.endName;
-    b.endName = a.startName;
-    state.lines.set(lineKey(r.id, 'b'), b);
-    state.dir = 'b';
-    notify.status('Copied A reversed into B. Now edit B wherever the way back uses a different road.');
-    commit();
-  };
   $('twoway-toggle').onchange = (e) => { const l = getLine(true); l.oneWay = !e.target.checked; commit(); };
   $('start-name').oninput = (e) => { const l = getLine(true); l.startName = e.target.value; saveLocal(); };
   $('end-name').oninput = (e) => { const l = getLine(true); l.endName = e.target.value; saveLocal(); };
@@ -309,7 +409,7 @@ async function start() {
   if (error) { notify.alert('The interactive map could not start (WebGL may be unavailable).'); return; }
   state.map = map;
   if (offline) window.__trace = state; // test hook (offline mode only)
-  map.on('click', (e) => withBusy(() => addPoint(e.lngLat)));
+  map.on('click', (e) => enqueue(() => addPoint(e.lngLat)));
   map.on('load', () => {
     const layout = { 'line-cap': 'round', 'line-join': 'round' };
     map.addSource('drafts', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });

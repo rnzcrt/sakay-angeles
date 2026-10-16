@@ -72,11 +72,11 @@ export function renderDraftResult(result, selectedIndex = 0) {
     return `${warn}<section class="card state state-empty" role="status"><h2 class="section-title">No draft match</h2><p>${escapeHtml(result.message)}</p></section>`;
   }
   const anyTwoWay = result.itineraries.some((it) => it.legs.some((l) => !l.oneWay));
-  const twoWayWarn = anyTwoWay ? '<div class="notice" role="note"><b>Check the way back.</b> Some lines were traced as “both ways”, so they assume the same road in each direction. Jeepney routes often return by a different road — trace each direction separately in the route tracer (Direction A and B) for correct results when you switch the trip.</div>' : '';
+  const twoWayWarn = anyTwoWay ? '<div class="notice" role="note"><b>Check the way back.</b> Some lines were traced as “both ways”, so they assume the same road in each direction. Jeepney routes often return by a different road — trace the way there (Route 1) and the way back (Route 2) separately in the route tracer for correct results when you switch the trip.</div>' : '';
   const cards = result.itineraries.map((it, i) => {
     const steps = [`<li class="step"><span class="step-icon" aria-hidden="true">🚶</span><div>Walk about <b>${formatMeters(it.accessWalkMeters)}</b> to the <b>${escapeHtml(it.legs[0].routeName)}</b> line<small>Straight-line estimate · look for the jeepney color below</small></div></li>`];
     it.legs.forEach((l, k) => {
-      steps.push(`<li class="step">${dot(l.displayColor)}<div>Ride the <b>${escapeHtml(l.routeName)}</b> (${escapeHtml(l.jeepneyColorName)} jeepney) about <b>${formatMeters(l.rideMeters)}</b> along its line<small>${escapeHtml(l.directionLabel)}${l.oneWay ? ' (one-way)' : ''} · board and get off near the white dots on the map (approximate — no real stops are known)</small></div></li>`);
+      steps.push(`<li class="step">${dot(l.displayColor)}<div>Ride the <b>${escapeHtml(l.routeName)}</b> (${escapeHtml(l.jeepneyColorName)} jeepney) about <b>${formatMeters(l.rideMeters)}</b> along its line<small>${escapeHtml(l.directionLabel)}${l.oneWay && !l.isLoop ? ' (one-way)' : ''} · board and get off near the white dots on the map (approximate — no real stops are known)</small></div></li>`);
       if (k < it.legs.length - 1) steps.push(`<li class="step"><span class="step-icon" aria-hidden="true">⇄</span><div>Transfer where the two lines come close (about ${formatMeters(it.transferWalkMeters)} apart)<small>Assumed from the traced lines — not a verified transfer</small></div></li>`);
     });
     steps.push(`<li class="step"><span class="step-icon" aria-hidden="true">🚶</span><div>Walk about <b>${formatMeters(it.egressWalkMeters)}</b> to your destination<small>Straight-line estimate</small></div></li>`);

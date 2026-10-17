@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDraftLines, planDraftTrip, DRAFT_STATUS } from '../src/routing/draftPlanner.js';
+import { buildDraftLines, planDraftTrip as planAny, DRAFT_STATUS, shiftToward } from '../src/routing/draftPlanner.js';
+// The original tests describe the strict 500 m walking behaviour; new long-walk tests call planAny directly.
+const planDraftTrip = (a) => planAny({ ...a, options: { maxWalkMeters: 500, ...a.options } });
 import { renderDraftResult } from '../src/ui/tripResults.js';
 
 // SYNTHETIC lines near 0°,0°: ~1.1 km per 0.01°.
@@ -64,7 +66,7 @@ test('each leg carries only the ridden segment, ordered from boarding to getting
   assert.ok(leg.segment.length >= 2);
   const first = leg.segment[0];
   const last = leg.segment.at(-1);
-  assert.ok(Math.abs(first[0] - leg.boardPoint[0]) < 1e-9 && Math.abs(last[0] - leg.alightPoint[0]) < 1e-9);
+  assert.ok(Math.abs(first[0] - leg.boardPoint[0]) < 0.0003 && Math.abs(last[0] - leg.alightPoint[0]) < 0.0003); // the stop is at the kerb, a few metres beside the line
   // the 0–0.05° line is cut down to roughly 0.005 → 0.045
   assert.ok(leg.segment.every((p) => p[0] >= 0.004 && p[0] <= 0.046));
   assert.equal(r.itineraries[0].walkLines.length, 2);
@@ -174,4 +176,73 @@ test('Route 1 + Route 2 that join up are one jeepney loop: you can stay on board
 test('Route 1 and Route 2 that do not join up stay separate one-way lines', () => {
   const lines = buildDraftLines({ features: [dirFeat('H', 'a', [[0, 0], [0.05, 0]]), dirFeat('H', 'b', [[0.08, 0.02], [0.03, 0.02]])] }, routes);
   assert.equal(lines.filter((l) => l.route.id === 'H').length, 2);
+});
+
+
+// ---- far trips, nearest-first ordering, kerb side ----
+test('far trips still get a route: walk to the line, ride, walk from the drop-off', () => {
+  // start 2.2 km north of the H line, destination 2.2 km south of it (well beyond 500 m)
+  const lines = buildDraftLines({ features: [feat('H', [[0, 0], [0.05, 0]])] }, routes);
+  assert.equal(planDraftTrip({ origin: [0.005, 0.02], destination: [0.045, -0.02], lines }).status, DRAFT_STATUS.NONE); // strict 500 m
+  const r = planAny({ origin: [0.005, 0.02], destination: [0.045, -0.02], lines });
+  assert.equal(r.status, DRAFT_STATUS.SUCCESS);
+  const it = r.itineraries[0];
+  assert.ok(it.accessWalkMeters > 2000 && it.egressWalkMeters > 2000);
+  assert.equal(it.walkLines.length, 2);
+  assert.equal(it.legs[0].routeId, 'H');
+});
+
+test('too far from every route (beyond the walking limit) explains how far', () => {
+  const lines = buildDraftLines({ features: [feat('H', [[0, 0], [0.05, 0]])] }, routes);
+  const r = planAny({ origin: [0.005, 0.2], destination: [0.045, 0.0005], lines });
+  assert.equal(r.status, DRAFT_STATUS.NONE);
+  assert.match(r.message, /Your start is \d+\.\d km from the nearest traced route/);
+  assert.ok(r.details.originGapMeters > 20000);
+});
+
+test('the option with the nearest start and drop-off is first; the quickest is badged too', () => {
+  // Line N passes right next to both points but is slow to get around; line F is 450 m away from both but short
+  const lines = buildDraftLines({ features: [
+    feat('H', [[0.005, 0.0002], [0.005, 0.02], [0.045, 0.02], [0.045, 0.0002]]), // passes right beside both points but goes a long way round between them
+    feat('V', [[0, 0.0045], [0.05, 0.0045]]),                                              // direct, but ~490 m north of the points
+  ] }, routes);
+  const r = planAny({ origin: [0.005, 0.0], destination: [0.045, 0.0], lines });
+  assert.equal(r.status, DRAFT_STATUS.SUCCESS);
+  const [first] = r.itineraries;
+  assert.ok(first.totalWalkMeters < 100, `first option walk was ${first.totalWalkMeters} m`);
+  const fastest = r.itineraries.find((i) => i.isFastest);
+  assert.ok(fastest);
+  assert.equal(r.itineraries.filter((i) => i.isFastest).length, 1);
+  const bestMinutes = Math.min(...r.itineraries.map((i) => i.estimatedMinutes));
+  assert.equal(fastest.estimatedMinutes, bestMinutes);
+});
+
+test('the stop is on the same side of the road as the person (shifted toward them)', () => {
+  const lines = buildDraftLines({ features: [feat('H', [[0, 0], [0.05, 0]])] }, routes);
+  // start north of the road, destination south of the road, each ~110 m from the line
+  const r = planAny({ origin: [0.005, 0.001], destination: [0.045, -0.001], lines });
+  const leg = r.itineraries[0].legs[0];
+  assert.ok(leg.boardPoint[1] > 0, 'boarding stop should be on the north (start) side');
+  assert.ok(leg.alightPoint[1] < 0, 'drop-off should be on the south (destination) side');
+  assert.ok(leg.boardPoint[1] < 0.001 && leg.alightPoint[1] > -0.001);
+  // walking is shortened by the kerb shift (about 110 m − 10 m)
+  assert.ok(r.itineraries[0].accessWalkMeters < 105 && r.itineraries[0].accessWalkMeters > 95);
+});
+
+test('shiftToward moves a point toward a target by at most the given metres', () => {
+  const p = [0, 0];
+  const q = shiftToward(p, [0, 0.001], 10); // target ~111 m north
+  assert.ok(q[1] > 0 && q[1] < 0.0002);
+  assert.deepEqual(shiftToward(p, [0, 0.00001], 10), [0, 0.00001]); // closer than 10 m: lands on the target
+  assert.deepEqual(shiftToward(p, p, 10), p);
+});
+
+test('results label long walks and show the nearest/fastest badges', () => {
+  const lines = buildDraftLines({ features: [feat('H', [[0, 0], [0.05, 0]])] }, routes);
+  const r = planAny({ origin: [0.005, 0.02], destination: [0.045, -0.02], lines });
+  const html = renderDraftResult(r);
+  assert.match(html, /a long walk/);
+  assert.match(html, /on foot/);
+  assert.match(html, /Nearest start &amp; drop-off/);
+  assert.match(html, /same side of the road as your destination/);
 });

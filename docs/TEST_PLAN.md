@@ -57,6 +57,12 @@ Test at 360, 390, 768, 1024 px and a wide desktop; Chrome/Edge, Firefox and Safa
 - [ ] Out-and-back lines show the ⚠ badge and warning; a true loop shows the loop note.
 - [ ] In the main app, a one-way line is not suggested for the opposite direction (unless it is a closed loop).
 
+### Far trips and ordering
+- [ ] A start/destination several km from any line still gets a result: walk → ride → walk, with walking minutes and a “long walk” note.
+- [ ] The first (selected) option has the least walking; the quickest is badged “Fastest (estimated)”.
+- [ ] The boarding/drop-off markers sit on the same side of the road as the start/destination.
+- [ ] A point beyond 5 km from every route says how far the nearest route is.
+
 ### Route 1 and Route 2
 - [ ] Trace Route 1, then *Start Route 2 where Route 1 ends* puts Route 2's first point exactly on Route 1's last point.
 - [ ] *Finish Route 2 at the start of Route 1* ends Route 2 on Route 1's first point; the panel shows ✔ ✔.

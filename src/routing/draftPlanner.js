@@ -16,7 +16,12 @@ import { DRAFT_TIME, PLANNER_DEFAULTS } from '../config.js';
 import { geometryPositions, haversineMeters, isValidLngLat } from './geo.js';
 
 export const DRAFT_DEFAULTS = {
-  maxWalkMeters: PLANNER_DEFAULTS.maxWalkMeters,
+  // Walking to the route / from the drop-off is allowed up to this far (a "long walk" note is shown in the UI).
+  maxWalkMeters: 5000,
+  // The jeepney stops at the kerb on the same side of the road as the person: shift the stop this far toward them.
+  kerbMeters: 10,
+  // Options whose total walking differs by less than this count as equally near; time then decides.
+  walkBucketMeters: 100,
   maxTransferMeters: 150,
   minRideMeters: 300,
   maxAlternatives: PLANNER_DEFAULTS.maxAlternatives,
@@ -30,6 +35,14 @@ export const DRAFT_STATUS = Object.freeze({
   NO_LINES: 'draft_no_lines',
   INVALID_INPUT: 'invalid_input',
 });
+
+/** Move `point` toward `target` by at most `meters` (small distances: flat-earth approximation). */
+export function shiftToward(point, target, meters) {
+  const d = haversineMeters(point, target);
+  if (d < 1 || meters <= 0) return point;
+  const f = Math.min(meters, d) / d;
+  return [point[0] + (target[0] - point[0]) * f, point[1] + (target[1] - point[1]) * f];
+}
 
 const walkMin = (m) => (m / 1000 / DRAFT_TIME.walkKmh) * 60;
 const rideMin = (m) => (m / 1000 / DRAFT_TIME.jeepneyKmh) * 60;
@@ -174,11 +187,14 @@ const makeLeg = (entry, from, to) => ({
   segment: segmentFor(entry, from, to), // only the part actually ridden
 });
 
-const compare = (a, b) =>
+// Default order: the option with the nearest start and drop-off (least walking) first; ties go to the quicker one.
+const compareNearest = (bucket) => (a, b) =>
+  Math.round(a.totalWalkMeters / bucket) - Math.round(b.totalWalkMeters / bucket) ||
   a.estimatedMinutes - b.estimatedMinutes ||
   a.transfers - b.transfers ||
-  a.totalWalkMeters - b.totalWalkMeters ||
   a.id.localeCompare(b.id);
+const compareFastest = (a, b) =>
+  a.estimatedMinutes - b.estimatedMinutes || a.totalWalkMeters - b.totalWalkMeters || a.transfers - b.transfers || a.id.localeCompare(b.id);
 
 export function planDraftTrip({ origin, destination, lines, options = {} }) {
   const o = { ...DRAFT_DEFAULTS, ...options };
@@ -231,14 +247,14 @@ export function planDraftTrip({ origin, destination, lines, options = {} }) {
         let first = null;
         for (const c of a.oc) {
           const ride = rideMeters(a.e, c, atACand);
-          if (ride === null || ride < o.minRideMeters / 2) continue;
+          if (ride === null || ride < o.minRideMeters) continue;
           const cost = walkMin(c.distanceMeters) + rideMin(ride);
           if (!first || cost < first.cost) first = { cost, c };
         }
         let second = null;
         for (const d of b.dc) {
           const ride = rideMeters(b.e, onB, d);
-          if (ride === null || ride < o.minRideMeters / 2) continue;
+          if (ride === null || ride < o.minRideMeters) continue;
           const cost = walkMin(d.distanceMeters) + rideMin(ride);
           if (!second || cost < second.cost) second = { cost, d };
         }
@@ -261,6 +277,15 @@ export function planDraftTrip({ origin, destination, lines, options = {} }) {
 
   const seen = new Map();
   for (const it of items) {
+    // The jeepney stops at the kerb on the same side of the road as the person.
+    const first = it.legs[0];
+    const last = it.legs.at(-1);
+    const boardKerb = Math.min(o.kerbMeters, it.accessWalkMeters);
+    const alightKerb = Math.min(o.kerbMeters, it.egressWalkMeters);
+    first.boardPoint = shiftToward(first.boardPoint, origin, o.kerbMeters);
+    last.alightPoint = shiftToward(last.alightPoint, destination, o.kerbMeters);
+    it.accessWalkMeters -= boardKerb;
+    it.egressWalkMeters -= alightKerb;
     it.totalWalkMeters = Math.round(it.accessWalkMeters + it.transferWalkMeters + it.egressWalkMeters);
     it.approxRideMeters = Math.round(it.legs.reduce((s, l) => s + l.rideMeters, 0));
     it.estimatedMinutes = Math.round(
@@ -269,20 +294,35 @@ export function planDraftTrip({ origin, destination, lines, options = {} }) {
     it.id = it.legs.map((l) => l.routeId).join('>');
     it.draft = true;
     // Dotted walking guides for the map: origin → board, (alight → next board), alight → destination.
-    it.walkLines = [[origin, it.legs[0].boardPoint]];
+    it.walkLines = [[origin, first.boardPoint]];
     if (it.legs.length > 1) it.walkLines.push([it.legs[0].alightPoint, it.legs[1].boardPoint]);
-    it.walkLines.push([it.legs.at(-1).alightPoint, destination]);
+    it.walkLines.push([last.alightPoint, destination]);
     const prev = seen.get(it.id);
-    if (!prev || compare(it, prev) < 0) seen.set(it.id, it);
+    if (!prev || compareNearest(o.walkBucketMeters)(it, prev) < 0) seen.set(it.id, it);
   }
-  const itineraries = [...seen.values()].sort(compare).slice(0, o.maxAlternatives);
-  if (!itineraries.length) {
-    return {
-      status: DRAFT_STATUS.NONE,
-      message: `No traced line passes within ${o.maxWalkMeters} m of both points, even allowing one connection. Try points closer to a route, or trace the missing routes.`,
-      itineraries: [],
-    };
+  const all = [...seen.values()];
+  if (!all.length) {
+    const nearestTo = (p) => Math.min(...lines.map((e) => nearest(e.line, p).distanceMeters));
+    const originGap = nearestTo(origin);
+    const destGap = nearestTo(destination);
+    const km = (m) => (m / 1000).toFixed(1);
+    let message;
+    if (originGap > o.maxWalkMeters && destGap > o.maxWalkMeters) {
+      message = `Your start (${km(originGap)} km) and destination (${km(destGap)} km) are both far from every traced route (more than ${km(o.maxWalkMeters)} km).`;
+    } else if (originGap > o.maxWalkMeters) {
+      message = `Your start is ${km(originGap)} km from the nearest traced route, which is further than ${km(o.maxWalkMeters)} km of walking.`;
+    } else if (destGap > o.maxWalkMeters) {
+      message = `Your destination is ${km(destGap)} km from the nearest traced route, which is further than ${km(o.maxWalkMeters)} km of walking.`;
+    } else {
+      message = 'The traced routes do not connect your start to your destination, even with one connection. Try nearby points, or trace the missing routes.';
+    }
+    return { status: DRAFT_STATUS.NONE, message, itineraries: [], details: { originGapMeters: Math.round(originGap), destGapMeters: Math.round(destGap) } };
   }
+  // Show the nearest-start/drop-off options first; make sure the quickest option is among them.
+  const fastest = [...all].sort(compareFastest)[0];
+  const itineraries = all.sort(compareNearest(o.walkBucketMeters)).slice(0, o.maxAlternatives);
+  if (!itineraries.includes(fastest)) itineraries[itineraries.length - 1] = fastest;
+  for (const it of itineraries) it.isFastest = it === fastest;
   return {
     status: DRAFT_STATUS.SUCCESS,
     message: 'Rough guidance from hand-traced, unverified lines. Stops, direction of travel and actual service are unknown.',

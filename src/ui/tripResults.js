@@ -1,6 +1,13 @@
 // Pure string renderers for trip planner outcomes.
 import { PLAN_STATUS } from '../routing/planner.js';
+import { DRAFT_TIME } from '../config.js';
 import { escapeHtml, formatMeters } from './html.js';
+
+const LONG_WALK_M = 800;
+const walkNote = (m) => {
+  const mins = Math.max(1, Math.round((m / 1000 / DRAFT_TIME.walkKmh) * 60));
+  return `Straight-line estimate · about ${mins} min on foot${m > LONG_WALK_M ? ' — a long walk, a tricycle or another ride may be quicker' : ''}`;
+};
 
 const dot = (color) => `<span class="leg-dot" style="background:${escapeHtml(color)}" aria-hidden="true"></span>`;
 
@@ -74,14 +81,14 @@ export function renderDraftResult(result, selectedIndex = 0) {
   const anyTwoWay = result.itineraries.some((it) => it.legs.some((l) => !l.oneWay));
   const twoWayWarn = anyTwoWay ? '<div class="notice" role="note"><b>Check the way back.</b> Some lines were traced as “both ways”, so they assume the same road in each direction. Jeepney routes often return by a different road — trace the way there (Route 1) and the way back (Route 2) separately in the route tracer for correct results when you switch the trip.</div>' : '';
   const cards = result.itineraries.map((it, i) => {
-    const steps = [`<li class="step"><span class="step-icon" aria-hidden="true">🚶</span><div>Walk about <b>${formatMeters(it.accessWalkMeters)}</b> to the <b>${escapeHtml(it.legs[0].routeName)}</b> line<small>Straight-line estimate · look for the jeepney color below</small></div></li>`];
+    const steps = [`<li class="step"><span class="step-icon" aria-hidden="true">🚶</span><div>Walk about <b>${formatMeters(it.accessWalkMeters)}</b> to the <b>${escapeHtml(it.legs[0].routeName)}</b> line (the ${escapeHtml(it.legs[0].jeepneyColorName)} jeepney)<small>${walkNote(it.accessWalkMeters)}</small></div></li>`];
     it.legs.forEach((l, k) => {
       steps.push(`<li class="step">${dot(l.displayColor)}<div>Ride the <b>${escapeHtml(l.routeName)}</b> (${escapeHtml(l.jeepneyColorName)} jeepney) about <b>${formatMeters(l.rideMeters)}</b> along its line<small>${escapeHtml(l.directionLabel)}${l.oneWay && !l.isLoop ? ' (one-way)' : ''} · board and get off near the white dots on the map (approximate — no real stops are known)</small></div></li>`);
       if (k < it.legs.length - 1) steps.push(`<li class="step"><span class="step-icon" aria-hidden="true">⇄</span><div>Transfer where the two lines come close (about ${formatMeters(it.transferWalkMeters)} apart)<small>Assumed from the traced lines — not a verified transfer</small></div></li>`);
     });
-    steps.push(`<li class="step"><span class="step-icon" aria-hidden="true">🚶</span><div>Walk about <b>${formatMeters(it.egressWalkMeters)}</b> to your destination<small>Straight-line estimate</small></div></li>`);
+    steps.push(`<li class="step"><span class="step-icon" aria-hidden="true">🚶</span><div>Get off on the same side of the road as your destination, then walk about <b>${formatMeters(it.egressWalkMeters)}</b><small>${walkNote(it.egressWalkMeters)}</small></div></li>`);
     const title = it.transfers === 0 ? 'Direct ride (draft)' : `${it.transfers} transfer (draft)`;
-    return `<section class="card itinerary${i === selectedIndex ? ' is-selected' : ''}"><h3>${title}${i === 0 ? ' <span class="badge">Fastest (estimated)</span>' : ''}</h3>
+    return `<section class="card itinerary${i === selectedIndex ? ' is-selected' : ''}"><h3>${title}${i === 0 ? ' <span class="badge">Nearest start &amp; drop-off</span>' : ''}${it.isFastest ? ' <span class="badge badge-fast">Fastest (estimated)</span>' : ''}</h3>
       <p class="summary"><b>≈ ${it.estimatedMinutes} min</b> (rough estimate) · walking ≈ ${formatMeters(it.totalWalkMeters)} · ride ≈ ${formatMeters(it.approxRideMeters)} along the line</p>
       <ol class="steps">${steps.join('')}</ol>
       <button type="button" class="btn btn-secondary" data-draft-itinerary="${i}" aria-pressed="${i === selectedIndex}">Show on map</button></section>`;

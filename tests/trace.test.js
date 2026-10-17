@@ -73,13 +73,19 @@ test('analyzeLine flags out-and-back traces, accepts true loops and one-way line
   assert.equal(analyzeLine([[0, 0]]).retraced, false);
 });
 
-test('shipped legacy traces: the known out-and-back routes are flagged, the true loop is not', () => {
+test('shipped traces: wherever both Route 1 and Route 2 exist, Route 2 starts at Route 1\'s end and ends at its start, with no round-trip lines', () => {
   const geo = JSON.parse(readFileSync(new URL('../public/data/routes.geojson', import.meta.url), 'utf8'));
   const lines = geojsonToLines(geo);
-  const flagged = (id) => analyzeLine(pathOf(lines.get(lineKey(id, 'a')))).retraced;
-  for (const id of ['checkpoint-balibago-highway', 'checkpoint-hensonville-holy', 'clark-main-gate-dau', 'pandang-pampang', 'villa-pampang']) assert.equal(flagged(id), true, id);
-  assert.equal(flagged('marisol-pampang'), false);
-  assert.equal(flagged('m-gate-friendship'), false);
+  let pairs = 0;
+  for (const r of routes) {
+    const a = lines.get(lineKey(r.id, 'a'));
+    const b = lines.get(lineKey(r.id, 'b'));
+    if (!a || !b) continue;
+    pairs += 1;
+    assert.equal(checkDirectionPair(a, b, 150).ok, true, `${r.id}: Route 2 must start where Route 1 ends and end where Route 1 starts`);
+    for (const l of [a, b]) assert.equal(analyzeLine(pathOf(l)).retraced, false, `${r.id}: a line should not go back over itself`);
+  }
+  assert.ok(pairs >= 1);
 });
 
 test('lengthKm and draft lines never enable verified planning', () => {

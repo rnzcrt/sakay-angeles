@@ -41,7 +41,12 @@ In the app, each part is ridden only in its traced order. When Route 1 and Route
 The **⇅ Switch trip** button swaps start and destination and searches again. Routes are ridden in their traced order, so a switched trip uses Route 2 for the way back (or rides the jeepney round the loop the long way if that is the only way).
 
 ## Draft suggestions
-Every route has a hand-traced draft line but none has verified stops, so when the verified planner has nothing to offer the app automatically falls back to `src/routing/draftPlanner.js`. It finds traced lines within 500 m of your start and destination, allows one connection where two lines come within 150 m, and ranks results by a **rough estimated time** (assumes ~4.5 km/h walking, ~12 km/h by jeepney and a few minutes' wait per ride; see `DRAFT_TIME` in `src/config.js`). Only the part of each line you would actually ride is drawn on the map, with dotted walking guides. Results are labelled *draft*, treat lines as one-way when they are marked `oneWay` (a closed loop may wrap around) and as two-way otherwise, give no stop names, and are **not** a substitute for verified data. The verified planner itself is unchanged and still refuses unverified data.
+Every route has a hand-traced draft line but none has verified stops, so when the verified planner has nothing to offer the app automatically falls back to `src/routing/draftPlanner.js`:
+- **It always tries to give a route.** If your start or destination is far from the traced lines, the result begins with a walk to the nearest route and ends with a walk from the drop-off. Walking up to 5 km is allowed; steps over 800 m are labelled as long walks with the walking time. Beyond that the app says how far away the nearest route is.
+- **Order of options:** the option with the **nearest start and drop-off** (least walking) comes first and is selected automatically. The quickest option (rough estimate: ~4.5 km/h walking, ~12 km/h by jeepney, a few minutes' wait per ride; see `DRAFT_TIME`) is badged “Fastest (estimated)”.
+- **Same side of the road:** the boarding and drop-off points are shifted about 10 m (`kerbMeters`) toward you / your destination, so the stop is on your side of the road.
+- One connection is allowed where two lines come within 150 m, and each part of a transfer trip must be at least 300 m long. Route 1 + Route 2 that join up act as one jeepney going round.
+Results are labelled *draft*, give no stop names, and are **not** a substitute for verified data. The verified planner itself is unchanged and still refuses unverified data.
 
 ## Repository layout
 ```text

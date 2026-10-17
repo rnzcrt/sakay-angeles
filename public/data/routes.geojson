@@ -9,7 +9,7 @@
         "directionId": "m-gate-friendship-a",
         "geometryId": "m-gate-friendship-a-draft",
         "direction": "a",
-        "oneWay": true,
+        "oneWay": false,
         "draft": true
       },
       "geometry": {
@@ -7309,7 +7309,7 @@
         "directionId": "sapang-bato-angeles-a",
         "geometryId": "sapang-bato-angeles-a-draft",
         "direction": "a",
-        "oneWay": true,
+        "oneWay": false,
         "draft": true
       },
       "geometry": {
@@ -10309,7 +10309,7 @@
         "directionId": "sunset-nepo-a",
         "geometryId": "sunset-nepo-a-draft",
         "direction": "a",
-        "oneWay": true,
+        "oneWay": false,
         "draft": true
       },
       "geometry": {

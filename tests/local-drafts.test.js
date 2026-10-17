@@ -4,7 +4,8 @@ import { mergeLocalDrafts, setIgnoreLocal, LOCAL_KEY, IGNORE_KEY } from '../src/
 import { lineFromCoords, lineKey } from '../src/trace/geojson.js';
 import { buildDraftLines } from '../src/routing/draftPlanner.js';
 import { renderDraftResult } from '../src/ui/tripResults.js';
-import { planDraftTrip } from '../src/routing/draftPlanner.js';
+import { planDraftTrip as planAny } from '../src/routing/draftPlanner.js';
+const planDraftTrip = (a) => planAny({ ...a, options: { maxWalkMeters: 500, ...a.options } });
 
 const memory = (init = {}) => { const m = { ...init }; return { getItem: (k) => m[k] ?? null, setItem: (k, v) => { m[k] = String(v); }, removeItem: (k) => { delete m[k]; }, dump: () => m }; };
 const routes = [

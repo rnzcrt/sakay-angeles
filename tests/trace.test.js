@@ -135,3 +135,30 @@ test('splitLineAt: Route 1 ends at the chosen point and Route 2 starts there', (
   assert.equal(two.endName, 'Start');
   assert.equal(one.oneWay && two.oneWay, true);
 });
+
+import { isDetour, findDetours, straightenDetours } from '../src/trace/geojson.js';
+
+test('isDetour: a path far longer than the gap between the clicks is a detour', () => {
+  assert.equal(isDetour(100, 130), false);
+  assert.equal(isDetour(100, 400), false);   // short gap: needs +350 m AND 2.2x
+  assert.equal(isDetour(100, 600), true);
+  assert.equal(isDetour(1000, 1900), false); // 1.9x is OK
+  assert.equal(isDetour(1000, 3000), true);
+});
+
+test('findDetours / straightenDetours fix only the bad segments', () => {
+  const wp = [[120.58, 15.13], [120.585, 15.13], [120.59, 15.13]];       // ~540 m gaps
+  const good = [wp[0], [120.5825, 15.1301], wp[1]];
+  const around = [wp[1], [120.585, 15.14], [120.59, 15.14], wp[2]];       // goes ~1.1 km north and back: a detour
+  const line = { waypoints: wp, segments: [good, around], oneWay: true };
+  const d = findDetours(line);
+  assert.equal(d.length, 1);
+  assert.equal(d[0].index, 1);
+  assert.equal(d[0].from, 2);
+  assert.equal(d[0].to, 3);
+  assert.equal(straightenDetours(line), 1);
+  assert.deepEqual(line.segments[1], [wp[1], wp[2]]);
+  assert.deepEqual(line.segments[0], good); // untouched
+  assert.equal(findDetours(line).length, 0);
+  assert.equal(straightenDetours(line), 0);
+});

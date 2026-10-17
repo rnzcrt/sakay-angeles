@@ -162,3 +162,29 @@ export function splitLineAt(line, i) {
     keep({ waypoints: wp.slice(i), segments: line.segments.slice(i), endName: line.startName ?? '' }),
   ];
 }
+
+/** A snapped path that is far longer than the gap between the two clicks is a detour. */
+export function isDetour(straightM, pathM, ratio = 2.2, minExtraM = 350) {
+  return pathM > Math.max(straightM * ratio, straightM + minExtraM);
+}
+
+/** Segments whose path is a long detour compared with the straight gap between their two clicks. */
+export function findDetours(line) {
+  const out = [];
+  line.segments.forEach((seg, i) => {
+    const a = line.waypoints[i];
+    const b = line.waypoints[i + 1];
+    if (!a || !b) return;
+    const straightM = haversineMeters(a, b);
+    const pathM = pathLengthMeters(seg);
+    if (isDetour(straightM, pathM)) out.push({ index: i, from: i + 1, to: i + 2, straightM: Math.round(straightM), pathM: Math.round(pathM) });
+  });
+  return out;
+}
+
+/** Replace every detour segment with a straight line between its two clicks. Returns how many were fixed. */
+export function straightenDetours(line) {
+  const found = findDetours(line);
+  for (const d of found) line.segments[d.index] = [line.waypoints[d.index], line.waypoints[d.index + 1]];
+  return found.length;
+}

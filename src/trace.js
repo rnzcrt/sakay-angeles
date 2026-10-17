@@ -1,7 +1,7 @@
 import './styles.css';
 import { loadData } from './data/loadData.js';
 import { createMap, maplibregl } from './map/createMap.js';
-import { haversineMeters } from './routing/geo.js';
+import { haversineMeters, pathLengthMeters } from './routing/geo.js';
 import { searchPlaces } from './services/geocoding.js';
 import { snapSegment } from './services/routing.js';
 import { setReplaceShipped } from './data/localDrafts.js';
@@ -12,7 +12,7 @@ import { escapeHtml } from './ui/html.js';
 import { enrichFeatures } from './map/routeLayers.js';
 import {
   DIRECTIONS, directionLabel, lineKey, emptyLine, pathOf, lineFromCoords, geojsonToLines, linesToGeoJson,
-  lengthKm, analyzeLine, validateDraftExport, checkDirectionPair, splitLineAt,
+  lengthKm, analyzeLine, validateDraftExport, checkDirectionPair, splitLineAt, isDetour, findDetours, straightenDetours,
 } from './trace/geojson.js';
 
 const $ = (id) => document.getElementById(id);
@@ -48,12 +48,20 @@ const getLine = (create = false) => {
 const routeLines = (id) => DIRECTIONS.map((d) => state.lines.get(lineKey(id, d))).filter(Boolean);
 
 // ---- segments (straight or road-snapped) ----
-async function makeSegment(a, b) {
-  if (!$('snap-toggle').checked) return [a, b];
+async function makeSegment(a, b, { snap = $('snap-toggle').checked } = {}) {
+  if (!snap) return [a, b];
   const res = await snapSegment(a, b);
-  if (res.ok) return res.coords;
-  notify.alert(res.message);
-  return [a, b];
+  if (!res.ok) {
+    notify.alert(res.message);
+    return [a, b];
+  }
+  const straightM = haversineMeters(a, b);
+  const pathM = pathLengthMeters(res.coords);
+  if (isDetour(straightM, pathM)) {
+    notify.alert(`Snapping wanted to go ${Math.round(pathM)} m for a ${Math.round(straightM)} m gap (a one-way street or an unconnected road is in the way), so a straight line was drawn instead. Add points along the real street, or hold Option/Alt while clicking for a straight piece.`);
+    return [a, b];
+  }
+  return res.coords;
 }
 
 // Edits run one after another in the order they were made. (Road snapping takes a moment;
@@ -134,6 +142,14 @@ function renderActive() {
     warn.hidden = false;
     warn.textContent = '⚠ Part of Route 2 goes back over the same road. That is fine only if the jeepney really returns by the same road.';
   } else warn.hidden = true;
+  const detours = line ? findDetours(line) : [];
+  const dn = $('detour-note');
+  dn.hidden = detours.length === 0;
+  if (detours.length) {
+    const first = detours[0];
+    dn.textContent = `⚠ ${detours.length} part${detours.length === 1 ? '' : 's'} of this route take${detours.length === 1 ? 's' : ''} a long detour (for example from point ${first.from} to point ${first.to}: ${first.pathM} m along roads for a ${first.straightM} m gap). Press “Straighten the detours”, then add points along the real street.`;
+  }
+  $('straighten-btn').hidden = detours.length === 0;
   // Route 2 must start where Route 1 ends and end where Route 1 starts
   const pairEl = $('pair-check');
   const pair = one && two ? checkDirectionPair(one, two) : null;
@@ -211,12 +227,12 @@ function commit() {
 }
 
 // ---- editing ----
-async function addPoint(lngLat) {
+async function addPoint(lngLat, opts = {}) {
   if (!state.active) { notify.alert('Pick a route from the list first, then click the map.'); return; }
   notify.clearAlert();
   const line = getLine(true);
   const p = [lngLat.lng, lngLat.lat];
-  if (line.waypoints.length) line.segments.push(await makeSegment(line.waypoints.at(-1), p));
+  if (line.waypoints.length) line.segments.push(await makeSegment(line.waypoints.at(-1), p, opts));
   line.waypoints.push(p);
   commit();
 }
@@ -323,6 +339,13 @@ function bind() {
     notify.status('Split. Route 1 now ends at that point and Route 2 starts there.');
     commit();
   };
+  $('straighten-btn').onclick = () => {
+    const line = getLine();
+    if (!line) return;
+    const n = straightenDetours(line);
+    notify.status(`${n} detour${n === 1 ? '' : 's'} replaced by straight lines. Add points along the real street to follow it.`);
+    commit();
+  };
   $('cut-btn').onclick = () => {
     const line = getLine();
     const i = state.selected;
@@ -402,14 +425,14 @@ async function start() {
   state.routes = loaded.data.routes;
   state.lines = loadLocal() ?? geojsonToLines(loaded.data.geojson);
   bind(); renderList(); renderActive();
-  $('trace-legend').innerHTML = '<strong>Tracing tips</strong><div class="legend-row">Click = add point</div><div class="legend-row">Drag = move point</div><div class="legend-row">Double-click point = delete</div><div class="legend-row">S = start, E = end</div>';
+  $('trace-legend').innerHTML = '<strong>Tracing tips</strong><div class="legend-row">Click = add point</div><div class="legend-row">Drag = move point</div><div class="legend-row">Double-click point = delete</div><div class="legend-row">Option/Alt + click = straight piece</div><div class="legend-row">S = start, E = end</div>';
 
   const offline = new URLSearchParams(location.search).has('offline');
   const { map, error } = createMap($('map'), (m) => notify.alert(m), { offline });
   if (error) { notify.alert('The interactive map could not start (WebGL may be unavailable).'); return; }
   state.map = map;
   if (offline) window.__trace = state; // test hook (offline mode only)
-  map.on('click', (e) => enqueue(() => addPoint(e.lngLat)));
+  map.on('click', (e) => { const straight = Boolean(e.originalEvent?.altKey); enqueue(() => addPoint(e.lngLat, straight ? { snap: false } : {})); });
   map.on('load', () => {
     const layout = { 'line-cap': 'round', 'line-join': 'round' };
     map.addSource('drafts', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });

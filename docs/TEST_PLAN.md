@@ -65,6 +65,7 @@ Test at 360, 390, 768, 1024 px and a wide desktop; Chrome/Edge, Firefox and Safa
 - [ ] In the main app, Route 1 + Route 2 that join up appear as one jeepney loop; the switched trip uses Route 2 for the way back.
 
 ### Editing a route
+- [ ] A click whose snapped path is a long detour is drawn straight with an explanation; Option/Alt + click adds a straight piece without calling the snap server; *Straighten the detours* fixes an existing line.
 - [ ] Click six points quickly: all six are recorded (the panel shows a working note while snapping).
 - [ ] Select a point → *Cut after the selected point* removes the later points; new clicks continue from there.
 

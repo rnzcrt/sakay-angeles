@@ -25,7 +25,7 @@
       <li>Pick a route.</li>
       <li><b>Route 1 — going:</b> your first click is the first terminal. Click along the road to the end. <b>The last click is the new terminal</b> — Route 2 starts there.</li>
       <li><b>Route 2 — coming back:</b> press <b>Start Route 2 where Route 1 ends</b>, click along the road back (it may be a different road), then press <b>Finish Route 2 at the start of Route 1</b>.</li>
-      <li>With <b>Snap to roads</b> on, the path follows the streets (including one-way rules) between your clicks.</li>
+      <li>With <b>Snap to roads</b> on, the path follows the streets (including one-way rules) between your clicks. If it takes a long detour, it is replaced by a straight line and you are told. <b>Hold Option/Alt while clicking</b> to add a straight (unsnapped) piece, or turn snapping off and click at every corner.</li>
       <li>Drag a point to move it; double-click a point to delete it. <b>Click a point to select it, then “Cut after the selected point”</b> to throw away everything after it and keep tracing from there.</li>
       <li>Press <b>Export</b>, then replace <code>public/data/routes.geojson</code>.</li>
     </ol>
@@ -48,6 +48,7 @@
       </div>
       <p class="muted" id="active-stats"></p>
       <p class="detail-flag" id="active-warning" hidden></p>
+      <p class="detail-flag" id="detour-note" hidden></p>
       <ul class="pair-check" id="pair-check" hidden></ul>
       <p class="muted" id="busy-note" hidden></p>
       <label class="draft-toggle"><input type="checkbox" id="twoway-toggle"> Jeepneys also ride this line backwards <small>(leave OFF — jeepneys follow each route in the order you traced it)</small></label>
@@ -58,6 +59,7 @@
       </details>
       <p class="muted" id="active-landmarks"></p>
       <div class="actions">
+        <button type="button" class="btn btn-primary" id="straighten-btn" hidden>Straighten the detours</button>
         <button type="button" class="btn btn-ghost" id="cut-btn" hidden>✂ Cut after the selected point</button>
         <button type="button" class="btn btn-ghost" id="undo-btn">Undo last point</button>
         <button type="button" class="btn btn-ghost" id="clear-btn">Clear this route</button>

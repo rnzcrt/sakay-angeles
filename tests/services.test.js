@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { requestLocation, GEO_ERROR } from '../src/services/geolocation.js';
 import { searchPlaces, clearGeocodeCache, GEOCODE_ERROR, createNominatimProvider } from '../src/services/geocoding.js';
+import { routeWalking } from '../src/services/walking.js';
+import { findNearbyPedestrianFacilities } from '../src/services/pedestrianFacilities.js';
 
 const geo = (impl) => ({ getCurrentPosition: impl });
 
@@ -82,4 +84,34 @@ test('provider adapter builds a bounded-bias Philippine query without autocomple
   assert.match(url, /countrycodes=ph/);
   assert.match(url, /viewbox=/);
   assert.match(url, /bounded=0/);
+});
+
+test('pedestrian router returns network geometry and its measured distance', async () => {
+  const result = await routeWalking([120.58, 15.15], [120.59, 15.16], {
+    config: { baseUrl: 'https://walk.test/route/v1/driving', timeoutMs: 1000 },
+    fetchImpl: async (url) => {
+      assert.match(url, /120\.58,15\.15;120\.59,15\.16/);
+      return { ok: true, json: async () => ({ code: 'Ok', routes: [{ distance: 1450, duration: 900, geometry: { coordinates: [[120.58, 15.15], [120.585, 15.155], [120.59, 15.16]] }, legs: [{ steps: [{ distance: 500, name: 'Sample Street', maneuver: { type: 'depart' } }] }] }] }) };
+    },
+  });
+  assert.equal(result.distanceMeters, 1450);
+  assert.equal(result.durationSeconds, 900);
+  assert.equal(result.coordinates.length, 3);
+  assert.match(result.steps[0].instruction, /Sample Street/);
+});
+
+test('pedestrian facility lookup labels mapped bridges and excludes private crossings', async () => {
+  const facilities = await findNearbyPedestrianFacilities([120.58, 15.15], {
+    config: { endpoint: 'https://overpass.test/api', radiusMeters: 1200, timeoutMs: 1000 },
+    fetchImpl: async (_url, options) => {
+      assert.equal(options.method, 'POST');
+      return { ok: true, json: async () => ({ elements: [
+        { type: 'way', id: 1, center: { lon: 120.581, lat: 15.151 }, tags: { highway: 'footway', bridge: 'yes', name: 'Sample Footbridge' } },
+        { type: 'node', id: 2, lon: 120.582, lat: 15.152, tags: { highway: 'crossing', access: 'private' } },
+      ] }) };
+    },
+  });
+  assert.equal(facilities.length, 1);
+  assert.equal(facilities[0].kind, 'Pedestrian footbridge');
+  assert.equal(facilities[0].name, 'Sample Footbridge');
 });

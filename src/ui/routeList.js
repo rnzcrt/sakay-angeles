@@ -13,7 +13,7 @@ const swatch = (route) =>
 
 export function renderRouteItem(route, { selected = false, visible = true, hasGeometry = false } = {}) {
   const status = hasGeometry
-    ? `Line: ${escapeHtml(VERIFICATION_LABELS[route.geometryStatus] ?? route.geometryStatus)}`
+    ? `${route.verifiedTerminals?.length ?? 0} verified terminals · path ${escapeHtml(VERIFICATION_LABELS[route.geometryStatus] ?? route.geometryStatus)}`
     : 'No digitized line yet';
   return `<li class="route-item${selected ? ' is-selected' : ''}">
   <label class="route-toggle"><input type="checkbox" data-route-toggle="${escapeHtml(route.id)}" ${visible ? 'checked' : ''} ${hasGeometry ? '' : 'disabled'}>
@@ -36,6 +36,7 @@ export function renderRouteDetail(route, { hasGeometry = false } = {}) {
     <ul class="detail-notes">${(s.conflictsWithLegend ?? []).map((c) => `<li>${escapeHtml(c)}</li>`).join('')}</ul>
     <p class="muted">Not used for trip suggestions.</p></div>`).join('');
   const stopsVerified = (route.directions ?? []).some((d) => d.verificationStatus === 'verified');
+  const terminals = (route.verifiedTerminals ?? []).map((stop) => `<li>${escapeHtml(stop.terminalLabel)}: ${escapeHtml(stop.name)} <small>(${stop.coordinates.map((n) => Number(n).toFixed(6)).join(', ')})</small></li>`).join('');
   return `<article class="card" aria-labelledby="route-detail-title">
   <h3 id="route-detail-title" class="detail-title">${swatch(route)} ${escapeHtml(route.name)}</h3>
   <dl class="detail-grid">
@@ -43,8 +44,9 @@ export function renderRouteDetail(route, { hasGeometry = false } = {}) {
     <dt>Source label</dt><dd>${escapeHtml(route.sourceLabel)}${route.sourceSubLabel ? ` <small>(${escapeHtml(route.sourceSubLabel)})</small>` : ''}</dd>
     ${route.description ? `<dt>Description</dt><dd>${escapeHtml(route.description)}</dd>` : ''}
     <dt>Landmarks on legend</dt><dd>${landmarks || '—'}<br><small>Listed as on the source legend. Exact stops and order are not verified.</small></dd>
+    <dt>Verified terminals</dt><dd>${terminals ? `<ul class="detail-notes">${terminals}</ul>` : 'No verified terminal locations recorded'}</dd>
     <dt>Line geometry</dt><dd>${escapeHtml(VERIFICATION_LABELS[route.geometryStatus] ?? route.geometryStatus)}${hasGeometry ? '' : ' — not digitized yet, so no line is drawn'}</dd>
-    <dt>Ordered stops</dt><dd>${stopsVerified ? 'Verified for at least one direction' : 'Not verified — not used for trip suggestions'}</dd>
+    <dt>Intermediate stops</dt><dd>${stopsVerified ? 'Verified for at least one direction' : 'Not mapped; trip suggestions estimate boarding and drop-off points along the traced path'}</dd>
     <dt>Source</dt><dd>${escapeHtml(route.source)}</dd>
   </dl>
   ${notes ? `<p class="detail-flag"><strong>To verify:</strong></p><ul class="detail-notes">${notes}</ul>` : ''}

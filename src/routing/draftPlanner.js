@@ -10,23 +10,32 @@
 // Lines marked one-way (`oneWay: true` in the GeoJSON) are only ridden in the
 // traced direction (a closed loop may wrap around). Older lines with no
 // direction information are treated as two-way. A transfer is assumed only
-// where two lines come within `maxTransferMeters` of each other.
+// where two lines come within `maxTransferMeters` of each other. The network
+// search can chain any number of distinct route IDs (not just one transfer).
 
 import { DRAFT_TIME, PLANNER_DEFAULTS } from '../config.js';
 import { geometryPositions, haversineMeters, isValidLngLat } from './geo.js';
 
 export const DRAFT_DEFAULTS = {
   // Walking to the route / from the drop-off is allowed up to this far (a "long walk" note is shown in the UI).
-  maxWalkMeters: 5000,
+  // First search radius for route matching. This is a proximity bound, not a
+  // statement that a 2.5 km walk is recommended; the complete itinerary is
+  // ranked after pedestrian routing, and direct walking remains an option.
+  maxWalkMeters: 2500,
+  walkSearchRadii: [500, 1000, 1800, 2500],
   // The jeepney stops at the kerb on the same side of the road as the person: shift the stop this far toward them.
   kerbMeters: 10,
   // Options whose total walking differs by less than this count as equally near; time then decides.
   walkBucketMeters: 100,
-  maxTransferMeters: 150,
+  // Treat crossings as easy transfers and allow a short walk between nearby,
+  // non-intersecting lines when there is no shared stop.
+  maxTransferMeters: 500,
   minRideMeters: 300,
   maxAlternatives: PLANNER_DEFAULTS.maxAlternatives,
   densifyMeters: 40,
-  maxCandidates: 12,
+  maxCandidates: 24,
+  // Keep short trips on foot when a jeepney would add a boarding and extra fare.
+  walkInsteadMeters: 1200,
 };
 
 export const DRAFT_STATUS = Object.freeze({
@@ -187,6 +196,196 @@ const makeLeg = (entry, from, to) => ({
   segment: segmentFor(entry, from, to), // only the part actually ridden
 });
 
+// Shortest-path search across every traced jeepney line. Densified line points
+// are graph nodes, consecutive points are ride edges, and nearby points on
+// different route IDs are possible (unverified) transfers. The search has no
+// fixed transfer-count limit; it avoids reboarding a route already used.
+function connectedJourneys(origin, destination, near, options) {
+  const entries = near.map((n) => n.e);
+  const nodes = [];
+  const byEntry = new Map();
+  for (const entry of entries) {
+    const ids = entry.line.pts.map((point, index) => {
+      const id = nodes.length;
+      nodes.push({ entry, index, point });
+      return id;
+    });
+    byEntry.set(entry, ids);
+  }
+  const edges = Array.from({ length: nodes.length }, () => []);
+  const link = (a, b, edge) => { edges[a].push({ to: b, ...edge }); };
+  for (const entry of entries) {
+    const ids = byEntry.get(entry);
+    for (let i = 0; i < ids.length - 1; i += 1) {
+      const meters = entry.line.cum[i + 1] - entry.line.cum[i];
+      link(ids[i], ids[i + 1], { type: 'ride', entry, meters });
+      if (!entry.oneWay) link(ids[i + 1], ids[i], { type: 'ride', entry, meters });
+    }
+    if (entry.isLoop && ids.length > 2) {
+      const meters = haversineMeters(entry.line.pts.at(-1), entry.line.pts[0]);
+      link(ids.at(-1), ids[0], { type: 'ride', entry, meters });
+    }
+  }
+
+  // Spatial buckets keep transfer discovery local even when route traces are
+  // long. At Angeles latitude, 0.001 degree cells are roughly 100 m wide.
+  const cell = (p) => [Math.floor(p[0] * 1000), Math.floor(p[1] * 1000)];
+  const buckets = new Map();
+  nodes.forEach((node, id) => {
+    const [x, y] = cell(node.point);
+    const key = `${x},${y}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(id);
+  });
+  const transferPairs = new Set();
+  nodes.forEach((node, id) => {
+    const [x, y] = cell(node.point);
+    const nearestByEntry = new Map();
+    // Five cells cover the 500 m transfer radius even for points on opposite
+    // sides of cell boundaries (cells are about 100 m at Angeles latitude).
+    for (let dx = -5; dx <= 5; dx += 1) for (let dy = -5; dy <= 5; dy += 1) {
+      for (const otherId of buckets.get(`${x + dx},${y + dy}`) ?? []) {
+        const other = nodes[otherId];
+        if (other.entry.route.id === node.entry.route.id) continue;
+        const meters = haversineMeters(node.point, other.point);
+        if (meters > options.maxTransferMeters) continue;
+        const old = nearestByEntry.get(other.entry);
+        if (!old || meters < old.meters) nearestByEntry.set(other.entry, { otherId, meters });
+      }
+    }
+    for (const { otherId, meters } of nearestByEntry.values()) {
+      const key = id < otherId ? `${id}:${otherId}` : `${otherId}:${id}`;
+      if (transferPairs.has(key)) continue;
+      transferPairs.add(key);
+      link(id, otherId, { type: 'transfer', meters });
+      link(otherId, id, { type: 'transfer', meters });
+    }
+  });
+
+  const nodeId = (entry, index) => byEntry.get(entry)[index];
+  const sources = [];
+  const targets = [];
+  for (const n of near) {
+    for (const c of n.oc) sources.push({ id: nodeId(n.e, c.index), candidate: c });
+    for (const c of n.dc) targets.push({ id: nodeId(n.e, c.index), candidate: c });
+  }
+  if (!sources.length || !targets.length) return [];
+
+  // Binary min-heap of [cost, state]. State stores whether the rider has
+  // actually ridden a useful distance, so nearby endpoints don't create a
+  // zero-ride transit itinerary.
+  const heap = [];
+  const push = (item) => {
+    heap.push(item);
+    let i = heap.length - 1;
+    while (i) { const p = (i - 1) >> 1; if (heap[p][0] <= item[0]) break; heap[i] = heap[p]; i = p; }
+    heap[i] = item;
+  };
+  const pop = () => {
+    const top = heap[0];
+    const last = heap.pop();
+    if (heap.length) {
+      let i = 0;
+      while (true) {
+        let c = i * 2 + 1;
+        if (c >= heap.length) break;
+        if (c + 1 < heap.length && heap[c + 1][0] < heap[c][0]) c += 1;
+        if (heap[c][0] >= last[0]) break;
+        heap[i] = heap[c]; i = c;
+      }
+      heap[i] = last;
+    }
+    return top;
+  };
+  const stateCount = nodes.length * 2;
+  const dist = new Float64Array(stateCount); dist.fill(Infinity);
+  const prev = new Array(stateCount);
+  const stateFor = (id, ridden) => id * 2 + Number(ridden);
+  for (const s of sources) {
+    const state = stateFor(s.id, false);
+    const cost = walkMin(s.candidate.distanceMeters) + DRAFT_TIME.waitPerBoardingMin;
+    if (cost < dist[state]) { dist[state] = cost; push([cost, state]); }
+  }
+  while (heap.length) {
+    const [cost, state] = pop();
+    if (cost !== dist[state]) continue;
+    const id = Math.floor(state / 2);
+    const ridden = Boolean(state % 2);
+    for (const edge of edges[id]) {
+      let extra;
+      let nextRidden = ridden;
+      if (edge.type === 'ride') {
+        extra = rideMin(edge.meters);
+        nextRidden = true;
+      } else {
+        extra = walkMin(edge.meters) + DRAFT_TIME.waitPerBoardingMin;
+      }
+      // Reaching the next route after any partial ride also counts as having
+      // ridden; the threshold filters trips that only shuffle at one junction.
+      const nextState = stateFor(edge.to, nextRidden);
+      const nextCost = cost + extra;
+      if (nextCost >= dist[nextState]) continue;
+      dist[nextState] = nextCost;
+      prev[nextState] = { state, edge };
+      push([nextCost, nextState]);
+    }
+  }
+
+  const bestByRouteSequence = new Map();
+  for (const target of targets) {
+    for (const ridden of [false, true]) {
+      if (!ridden) continue;
+      const endState = stateFor(target.id, true);
+      const total = dist[endState] + walkMin(target.candidate.distanceMeters);
+      if (!Number.isFinite(total)) continue;
+      const states = [endState];
+      while (prev[states[0]]) states.unshift(prev[states[0]].state);
+      const pathNodes = states.map((s) => nodes[Math.floor(s / 2)]);
+      const pathEdges = states.slice(1).map((s) => prev[s].edge);
+      const legs = [];
+      let from = pathNodes[0];
+      let to = from;
+      let transferWalkMeters = 0;
+      for (let i = 0; i < pathEdges.length; i += 1) {
+        const edge = pathEdges[i];
+        if (edge.type === 'ride') to = pathNodes[i + 1];
+        else {
+          if (from.entry === to.entry && from.index !== to.index) {
+            legs.push(makeLeg(from.entry, candidate(from.entry.line, from.index, 0), candidate(from.entry.line, to.index, 0)));
+          }
+          transferWalkMeters += edge.meters;
+          from = pathNodes[i + 1];
+          to = from;
+        }
+      }
+      if (from.entry === to.entry && from.index !== to.index) {
+        legs.push(makeLeg(from.entry, candidate(from.entry.line, from.index, 0), candidate(from.entry.line, to.index, 0)));
+      }
+      if (!legs.length) continue;
+      // Don't recommend paying for a token ride just to leave the jeep and walk
+      // the rest. This guard was lost when the one-transfer search became a
+      // network search; keep tiny ride fragments out of the candidate pool.
+      if (legs.some((leg) => leg.rideMeters < options.minRideMeters)) continue;
+      const sequence = legs.map((leg) => leg.routeId).join('>');
+      const item = {
+        transfers: legs.length - 1,
+        legs,
+        accessWalkMeters: pathNodes[0].point ? haversineMeters(origin, pathNodes[0].point) : 0,
+        egressWalkMeters: haversineMeters(destination, pathNodes.at(-1).point),
+        transferWalkMeters,
+        transferPoint: null,
+        totalWalkMeters: Math.round(haversineMeters(origin, pathNodes[0].point) + transferWalkMeters + haversineMeters(destination, pathNodes.at(-1).point)),
+        approxRideMeters: Math.round(legs.reduce((sum, leg) => sum + leg.rideMeters, 0)),
+        estimatedMinutes: Math.round(total),
+        id: sequence,
+      };
+      const old = bestByRouteSequence.get(sequence);
+      if (!old || item.estimatedMinutes < old.estimatedMinutes) bestByRouteSequence.set(sequence, item);
+    }
+  }
+  return [...bestByRouteSequence.values()];
+}
+
 // Default order: the option with the nearest start and drop-off (least walking) first; ties go to the quicker one.
 const compareNearest = (bucket) => (a, b) =>
   Math.round(a.totalWalkMeters / bucket) - Math.round(b.totalWalkMeters / bucket) ||
@@ -205,79 +404,55 @@ export function planDraftTrip({ origin, destination, lines, options = {} }) {
     return { status: DRAFT_STATUS.NO_LINES, message: 'No route lines have been traced yet.', itineraries: [] };
   }
 
-  const near = lines.map((e) => ({
-    e,
-    oc: localMinima(e.line, origin, o.maxWalkMeters, o.maxCandidates),
-    dc: localMinima(e.line, destination, o.maxWalkMeters, o.maxCandidates),
-  }));
   const items = [];
 
-  // Direct: one line passes near both ends; choose the pair of passes with the lowest time.
-  for (const n of near) {
-    let best = null;
-    for (const a of n.oc) {
-      for (const b of n.dc) {
-        const ride = rideMeters(n.e, a, b);
-        if (ride === null || ride < o.minRideMeters) continue;
-        const cost = walkMin(a.distanceMeters + b.distanceMeters) + rideMin(ride);
-        if (!best || cost < best.cost) best = { cost, a, b };
-      }
-    }
-    if (!best) continue;
+  // A short walk is a real alternative to paying for another jeepney. Keep it
+  // beside transit suggestions so the rider can choose; its time uses the same
+  // rough walking-speed assumption as the draft estimates.
+  const directWalkMeters = haversineMeters(origin, destination);
+  if (directWalkMeters <= o.walkInsteadMeters) {
     items.push({
       transfers: 0,
-      legs: [makeLeg(n.e, best.a, best.b)],
-      accessWalkMeters: best.a.distanceMeters,
-      egressWalkMeters: best.b.distanceMeters,
+      legs: [],
+      accessWalkMeters: directWalkMeters,
+      egressWalkMeters: 0,
       transferWalkMeters: 0,
       transferPoint: null,
+      walkingOnly: true,
     });
   }
 
-  // One transfer: A near start, B near destination, lines come within maxTransferMeters.
-  for (const a of near) {
-    if (!a.oc.length) continue;
-    for (const b of near) {
-      if (a.e.route.id === b.e.route.id || !b.dc.length) continue;
-      let best = null;
-      for (let i = 0; i < a.e.line.pts.length; i += 1) {
-        const onB = nearest(b.e.line, a.e.line.pts[i]);
-        if (onB.distanceMeters > o.maxTransferMeters) continue;
-        const atACand = candidate(a.e.line, i, onB.distanceMeters);
-        let first = null;
-        for (const c of a.oc) {
-          const ride = rideMeters(a.e, c, atACand);
-          if (ride === null || ride < o.minRideMeters) continue;
-          const cost = walkMin(c.distanceMeters) + rideMin(ride);
-          if (!first || cost < first.cost) first = { cost, c };
-        }
-        let second = null;
-        for (const d of b.dc) {
-          const ride = rideMeters(b.e, onB, d);
-          if (ride === null || ride < o.minRideMeters) continue;
-          const cost = walkMin(d.distanceMeters) + rideMin(ride);
-          if (!second || cost < second.cost) second = { cost, d };
-        }
-        if (!first || !second) continue;
-        const total = first.cost + second.cost + walkMin(onB.distanceMeters);
-        if (!best || total < best.total) best = { total, i, onB, first, second };
-      }
-      if (!best) continue;
-      const atA = candidate(a.e.line, best.i, best.onB.distanceMeters);
-      items.push({
-        transfers: 1,
-        legs: [makeLeg(a.e, best.first.c, atA), makeLeg(b.e, best.onB, best.second.d)],
-        accessWalkMeters: best.first.c.distanceMeters,
-        egressWalkMeters: best.second.d.distanceMeters,
-        transferWalkMeters: best.onB.distanceMeters,
-        transferPoint: atA.point,
-      });
-    }
+  // Expand the proximity search in steps. Each result is a complete itinerary;
+  // the pedestrian network later supplies the real walk distance for ranking.
+  // Keep candidates from earlier radii so a slightly longer walk can still win
+  // on time or transfers when the whole trip is considered.
+  const radii = [...new Set([...(o.walkSearchRadii ?? []), o.maxWalkMeters])]
+    .filter((radius) => Number.isFinite(radius) && radius > 0 && radius <= o.maxWalkMeters)
+    .sort((a, b) => a - b);
+  for (const radius of radii) {
+    const near = lines.map((e) => ({
+      e,
+      oc: localMinima(e.line, origin, radius, o.maxCandidates),
+      dc: localMinima(e.line, destination, radius, o.maxCandidates),
+    }));
+    // This supports any useful chain of distinct route IDs, including three
+    // or more rides; each returned candidate is an end-to-end trip.
+    items.push(...connectedJourneys(origin, destination, near, o));
   }
 
   const seen = new Map();
   for (const it of items) {
     // The jeepney stops at the kerb on the same side of the road as the person.
+    if (it.walkingOnly) {
+      it.totalWalkMeters = Math.round(directWalkMeters);
+      it.approxRideMeters = 0;
+      it.estimatedMinutes = Math.max(1, Math.round(walkMin(it.totalWalkMeters)));
+      it.id = 'walk';
+      it.draft = true;
+      it.walkLines = [[origin, destination]];
+      seen.set(it.id, it);
+      continue;
+    }
     const first = it.legs[0];
     const last = it.legs.at(-1);
     const boardKerb = Math.min(o.kerbMeters, it.accessWalkMeters);
@@ -295,7 +470,7 @@ export function planDraftTrip({ origin, destination, lines, options = {} }) {
     it.draft = true;
     // Dotted walking guides for the map: origin → board, (alight → next board), alight → destination.
     it.walkLines = [[origin, first.boardPoint]];
-    if (it.legs.length > 1) it.walkLines.push([it.legs[0].alightPoint, it.legs[1].boardPoint]);
+    for (let i = 0; i < it.legs.length - 1; i += 1) it.walkLines.push([it.legs[i].alightPoint, it.legs[i + 1].boardPoint]);
     it.walkLines.push([last.alightPoint, destination]);
     const prev = seen.get(it.id);
     if (!prev || compareNearest(o.walkBucketMeters)(it, prev) < 0) seen.set(it.id, it);
@@ -314,18 +489,23 @@ export function planDraftTrip({ origin, destination, lines, options = {} }) {
     } else if (destGap > o.maxWalkMeters) {
       message = `Your destination is ${km(destGap)} km from the nearest traced route, which is further than ${km(o.maxWalkMeters)} km of walking.`;
     } else {
-      message = 'The traced routes do not connect your start to your destination, even with one connection. Try nearby points, or trace the missing routes.';
+      message = 'The traced route network does not connect your start to your destination. Try nearby points, or trace the missing routes.';
     }
     return { status: DRAFT_STATUS.NONE, message, itineraries: [], details: { originGapMeters: Math.round(originGap), destGapMeters: Math.round(destGap) } };
   }
   // Show the nearest-start/drop-off options first; make sure the quickest option is among them.
   const fastest = [...all].sort(compareFastest)[0];
-  const itineraries = all.sort(compareNearest(o.walkBucketMeters)).slice(0, o.maxAlternatives);
+  const displayLimit = o.maxAlternatives;
+  const candidateLimit = Math.max(displayLimit, Math.floor(options.candidateLimit ?? displayLimit));
+  const itineraries = all.sort(compareNearest(o.walkBucketMeters)).slice(0, candidateLimit);
   if (!itineraries.includes(fastest)) itineraries[itineraries.length - 1] = fastest;
   for (const it of itineraries) it.isFastest = it === fastest;
+  const leastWalking = [...all].sort((a, b) => a.totalWalkMeters - b.totalWalkMeters || a.estimatedMinutes - b.estimatedMinutes)[0];
+  for (const it of itineraries) it.isLeastWalking = it === leastWalking;
   return {
     status: DRAFT_STATUS.SUCCESS,
     message: 'Rough guidance from hand-traced, unverified lines. Stops, direction of travel and actual service are unknown.',
     itineraries,
+    displayLimit,
   };
 }

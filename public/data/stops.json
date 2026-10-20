@@ -1,6 +1,371 @@
 {
   "schemaVersion": 1,
-  "note": "Intentionally empty. No boarding/alighting stop has been surveyed or verified yet. Do not add landmark guesses here; see docs/ROUTE_DATA_GUIDE.md.",
-  "stops": [],
+  "note": "Verified terminal locations recorded from the user’s real-world observations. Each route trace endpoint is linked to a verified terminal stop. Intermediate boarding points and route transfers are not represented here.",
+  "stops": [
+    {
+      "id": "m-gate-friendship-terminal-a",
+      "name": "M Gate – Friendship Terminal A",
+      "coordinates": [
+        120.554785,
+        15.162948
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "m-gate-friendship",
+      "terminalLabel": "A",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "m-gate-friendship-terminal-b",
+      "name": "M Gate – Friendship Terminal B",
+      "coordinates": [
+        120.583014,
+        15.166396
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "m-gate-friendship",
+      "terminalLabel": "B",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "checkpoint-balibago-highway-terminal-a",
+      "name": "C'Point – Balibago – Hi'way Terminal A",
+      "coordinates": [
+        120.582541,
+        15.16817
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "checkpoint-balibago-highway",
+      "terminalLabel": "A",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "checkpoint-balibago-highway-terminal-b",
+      "name": "C'Point – Balibago – Hi'way Terminal B",
+      "coordinates": [
+        120.587915,
+        15.138544
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "checkpoint-balibago-highway",
+      "terminalLabel": "B",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "checkpoint-balibago-highway-terminal-endpoint-3",
+      "name": "C'Point – Balibago – Hi'way Observed terminal (b end)",
+      "coordinates": [
+        120.582494,
+        15.168271
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "checkpoint-balibago-highway",
+      "terminalLabel": "b end",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "checkpoint-hensonville-holy-terminal-a",
+      "name": "C'Point – Hensonville – Holy Terminal A",
+      "coordinates": [
+        120.583037,
+        15.166441
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "checkpoint-hensonville-holy",
+      "terminalLabel": "A",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "checkpoint-hensonville-holy-terminal-b",
+      "name": "C'Point – Hensonville – Holy Terminal B",
+      "coordinates": [
+        120.588414,
+        15.138172
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "checkpoint-hensonville-holy",
+      "terminalLabel": "B",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "checkpoint-hensonville-holy-terminal-endpoint-3",
+      "name": "C'Point – Hensonville – Holy Observed terminal (b end)",
+      "coordinates": [
+        120.583036,
+        15.16644
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "checkpoint-hensonville-holy",
+      "terminalLabel": "b end",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "sm-checkpoint-holy-highway-terminal-a",
+      "name": "SM – C'Point – Holy – Hi'way Terminal A",
+      "coordinates": [
+        120.582399,
+        15.168166
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "sm-checkpoint-holy-highway",
+      "terminalLabel": "A",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "sm-checkpoint-holy-highway-terminal-b",
+      "name": "SM – C'Point – Holy – Hi'way Terminal B",
+      "coordinates": [
+        120.591267,
+        15.134149
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "sm-checkpoint-holy-highway",
+      "terminalLabel": "B",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "sm-checkpoint-holy-highway-terminal-endpoint-3",
+      "name": "SM – C'Point – Holy – Hi'way Observed terminal (b end)",
+      "coordinates": [
+        120.582493,
+        15.168292
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "sm-checkpoint-holy-highway",
+      "terminalLabel": "b end",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "clark-main-gate-dau-terminal-a",
+      "name": "Clark – Main Gate – Dau Terminal A",
+      "coordinates": [
+        120.582495,
+        15.168235
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "clark-main-gate-dau",
+      "terminalLabel": "A",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "clark-main-gate-dau-terminal-b",
+      "name": "Clark – Main Gate – Dau Terminal B",
+      "coordinates": [
+        120.588,
+        15.178422
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "clark-main-gate-dau",
+      "terminalLabel": "B",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "clark-main-gate-dau-terminal-endpoint-3",
+      "name": "Clark – Main Gate – Dau Observed terminal (b end)",
+      "coordinates": [
+        120.5826,
+        15.168281
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "clark-main-gate-dau",
+      "terminalLabel": "b end",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "marisol-pampang-terminal-a",
+      "name": "Marisol – Pampang Terminal A",
+      "coordinates": [
+        120.588265,
+        15.138282
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "marisol-pampang",
+      "terminalLabel": "A",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "marisol-pampang-terminal-b",
+      "name": "Marisol – Pampang Terminal B",
+      "coordinates": [
+        120.595289,
+        15.145347
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "marisol-pampang",
+      "terminalLabel": "B",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "sapang-bato-angeles-terminal-a",
+      "name": "Sapang Bato – Angles Terminal A",
+      "coordinates": [
+        120.587965,
+        15.141828
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "sapang-bato-angeles",
+      "terminalLabel": "A",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "sapang-bato-angeles-terminal-b",
+      "name": "Sapang Bato – Angles Terminal B",
+      "coordinates": [
+        120.553815,
+        15.162632
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "sapang-bato-angeles",
+      "terminalLabel": "B",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "pandang-pampang-terminal-a",
+      "name": "Pandan – Pampang Terminal A",
+      "coordinates": [
+        120.608358,
+        15.16208
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "pandang-pampang",
+      "terminalLabel": "A",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "pandang-pampang-terminal-b",
+      "name": "Pandan – Pampang Terminal B",
+      "coordinates": [
+        120.589076,
+        15.138048
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "pandang-pampang",
+      "terminalLabel": "B",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "pandang-pampang-terminal-endpoint-3",
+      "name": "Pandan – Pampang Observed terminal (b end)",
+      "coordinates": [
+        120.608068,
+        15.162158
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "pandang-pampang",
+      "terminalLabel": "b end",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "sunset-nepo-terminal-a",
+      "name": "Sunset – Nepo Terminal A",
+      "coordinates": [
+        120.586499,
+        15.135405
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "sunset-nepo",
+      "terminalLabel": "A",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "sunset-nepo-terminal-b",
+      "name": "Sunset – Nepo Terminal B",
+      "coordinates": [
+        120.567086,
+        15.134626
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "sunset-nepo",
+      "terminalLabel": "B",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "villa-pampang-terminal-a",
+      "name": "Villa – Pampang Terminal A",
+      "coordinates": [
+        120.599594,
+        15.123181
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "villa-pampang",
+      "terminalLabel": "A",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "villa-pampang-terminal-b",
+      "name": "Villa – Pampang Terminal B",
+      "coordinates": [
+        120.588247,
+        15.138296
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "villa-pampang",
+      "terminalLabel": "B",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "villa-pampang-terminal-endpoint-3",
+      "name": "Villa – Pampang Observed terminal (b end)",
+      "coordinates": [
+        120.599604,
+        15.123194
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "villa-pampang",
+      "terminalLabel": "b end",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "capaya-angeles-terminal-a",
+      "name": "Capaya – Angeles Terminal A",
+      "coordinates": [
+        120.588915,
+        15.13789
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "capaya-angeles",
+      "terminalLabel": "A",
+      "source": "User real-world observation"
+    },
+    {
+      "id": "capaya-angeles-terminal-b",
+      "name": "Capaya – Angeles Terminal B",
+      "coordinates": [
+        120.612011,
+        15.150898
+      ],
+      "verificationStatus": "verified",
+      "kind": "terminal",
+      "routeId": "capaya-angeles",
+      "terminalLabel": "B",
+      "source": "User real-world observation"
+    }
+  ],
   "transfers": []
 }

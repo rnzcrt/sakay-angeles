@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "dataStatus": "Route names, colors and landmark lists are transcribed from the supplied legend image. No route has digitized geometry, ordered stops or verified directions yet.",
+  "dataStatus": "Route endpoint terminals A/B are verified from the user’s real-world observations. Traced route shapes, intermediate boarding/alighting points, service directions and transfers remain unverified.",
   "source": {
     "name": "HERE Angeles + Clark — Angeles City Jeepneys (route legend and route maps)",
     "credit": "© 2021 Ray Haffenden / WayGo Maps (credit printed on the supplied schematic)",

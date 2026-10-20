@@ -60,7 +60,7 @@ test('route detail flags source ambiguities and unverified status', () => {
   const html = renderRouteDetail(real.find((r) => r.id === 'checkpoint-hensonville-holy'), { hasGeometry: false });
   assert.match(html, /To verify/);
   assert.match(html, /Holy Rosary Church/);
-  assert.match(html, /Not verified/);
+  assert.match(html, /Unverified/);
 });
 
 test('geocode choices flag results outside the service area', () => {

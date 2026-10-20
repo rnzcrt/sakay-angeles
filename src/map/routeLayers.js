@@ -74,7 +74,9 @@ export function fitToRoutes(map, geojson, routeIds, padding = 50) {
 export function makeMarker(map, kind, coordinates, label) {
   const el = document.createElement('div');
   el.className = `marker marker-${kind}`;
-  el.textContent = kind === 'origin' ? 'A' : kind === 'destination' ? 'B' : '•';
+  el.textContent = kind === 'origin' || kind === 'destination' ? kind === 'origin' ? 'A' : 'B'
+    : kind === 'terminal' ? 'T'
+      : kind === 'bridge' ? '↥' : kind === 'underpass' ? '↧' : kind === 'crossing' ? '×' : '•';
   el.setAttribute('role', 'img');
   el.setAttribute('aria-label', label);
   return new maplibregl.Marker({ element: el })

@@ -74,22 +74,48 @@ export function renderGeocodeChoices(which, results) {
 }
 
 export function renderDraftResult(result, selectedIndex = 0) {
-  const warn = `<div class="notice" role="note"><b>Draft guidance only.</b> These suggestions come from hand-traced, <b>unverified</b> route lines. They do not know real stops, which way a jeepney runs, or whether it is running. Ask a driver or local before relying on them. Times assume about 4.5 km/h walking, 12 km/h by jeepney and a few minutes of waiting per ride; they are not schedules.</div>`;
+  const warn = `<div class="notice" role="note"><b>Terminal locations A/B are verified from your real-world observations.</b> Route geometry, boarding and drop-off points along the route, transfers between routes, service direction and current operation are unverified or estimated. Walking directions use pedestrian paths mapped in OpenStreetMap; check crossings in person. Times are estimates, not schedules.</div>`;
   if (result.status !== 'draft_success') {
     return `${warn}<section class="card state state-empty" role="status"><h2 class="section-title">No draft match</h2><p>${escapeHtml(result.message)}</p></section>`;
   }
   const anyTwoWay = result.itineraries.some((it) => it.legs.some((l) => !l.oneWay));
   const twoWayWarn = anyTwoWay ? '<div class="notice" role="note"><b>Check the way back.</b> Some lines were traced as “both ways”, so they assume the same road in each direction. Jeepney routes often return by a different road — trace the way there (Route 1) and the way back (Route 2) separately in the route tracer for correct results when you switch the trip.</div>' : '';
   const cards = result.itineraries.map((it, i) => {
-    const steps = [`<li class="step"><span class="step-icon" aria-hidden="true">🚶</span><div>Walk about <b>${formatMeters(it.accessWalkMeters)}</b> to the <b>${escapeHtml(it.legs[0].routeName)}</b> line (the ${escapeHtml(it.legs[0].jeepneyColorName)} jeepney)<small>${walkNote(it.accessWalkMeters)}</small></div></li>`];
+    if (it.walkingOnly) {
+      const walk = it.walkRoutes?.[0];
+      const meters = walk?.distanceMeters ?? it.totalWalkMeters;
+      const directions = walk?.steps?.length ? `<small><details class="walk-turns"><summary>Show ${walk.steps.length} walking steps</summary><ol>${walk.steps.map((s) => `<li>${escapeHtml(s.instruction)} · ${formatMeters(s.distanceMeters)}</li>`).join('')}</ol></details></small>` : '<small>Pedestrian route unavailable; straight-line estimate shown. Sidewalks and crossings may differ.</small>';
+      const steps = `<li class="step"><span class="step-icon" aria-hidden="true">🚶</span><div>Walk to your destination, about <b>${formatMeters(meters)}</b>${directions}</div></li>`;
+      return `<section class="card itinerary${i === selectedIndex ? ' is-selected' : ''}"><h3>Walk (no fare)${i === 0 ? ' <span class="badge">No jeepney fare</span>' : ''}</h3><p class="summary">${walk ? `≈ ${Math.max(1, Math.round(walk.durationSeconds / 60))} min` : `≈ ${it.estimatedMinutes} min`} on foot · walking ≈ ${formatMeters(meters)}</p><ol class="steps">${steps}</ol><button type="button" class="btn btn-secondary" data-draft-itinerary="${i}" aria-pressed="${i === selectedIndex}">Show on map</button></section>`;
+    }
+    const walkingStep = (index, fallbackMeters) => {
+      const walk = it.walkRoutes?.[index];
+      if (!walk) return `${walkNote(fallbackMeters)} · straight-line guide; sidewalks and crossings are not checked`;
+      return walk.steps.length
+        ? `Pedestrian route via OpenStreetMap · <details class="walk-turns"><summary>Show ${walk.steps.length} walking steps</summary><ol>${walk.steps.map((s) => `<li>${escapeHtml(s.instruction)} · ${formatMeters(s.distanceMeters)}</li>`).join('')}</ol></details>`
+        : 'Pedestrian route via OpenStreetMap';
+    };
+    const walkMeters = (index, fallback) => it.walkRoutes?.[index]?.distanceMeters ?? fallback;
+    const steps = [`<li class="step"><span class="step-icon" aria-hidden="true">🚶</span><div>Walk about <b>${formatMeters(walkMeters(0, it.accessWalkMeters))}</b> to the <b>${escapeHtml(it.legs[0].routeName)}</b> line (the ${escapeHtml(it.legs[0].jeepneyColorName)} jeepney)<small>${walkingStep(0, it.accessWalkMeters)}</small></div></li>`];
     it.legs.forEach((l, k) => {
-      steps.push(`<li class="step">${dot(l.displayColor)}<div>Ride the <b>${escapeHtml(l.routeName)}</b> (${escapeHtml(l.jeepneyColorName)} jeepney) about <b>${formatMeters(l.rideMeters)}</b> along its line<small>${escapeHtml(l.directionLabel)}${l.oneWay && !l.isLoop ? ' (one-way)' : ''} · board and get off near the white dots on the map (approximate — no real stops are known)</small></div></li>`);
-      if (k < it.legs.length - 1) steps.push(`<li class="step"><span class="step-icon" aria-hidden="true">⇄</span><div>Transfer where the two lines come close (about ${formatMeters(it.transferWalkMeters)} apart)<small>Assumed from the traced lines — not a verified transfer</small></div></li>`);
+      steps.push(`<li class="step">${dot(l.displayColor)}<div>Ride the <b>${escapeHtml(l.routeName)}</b> (${escapeHtml(l.jeepneyColorName)} jeepney) about <b>${formatMeters(l.rideMeters)}</b> along its line<small>${escapeHtml(l.directionLabel)}${l.oneWay && !l.isLoop ? ' (one-way)' : ''} · terminal locations A/B are verified; boarding and drop-off points along the line are approximate</small></div></li>`);
+      if (k < it.legs.length - 1) steps.push(`<li class="step"><span class="step-icon" aria-hidden="true">⇄</span><div>Transfer between jeepney lines (about ${formatMeters(walkMeters(k + 1, it.transferWalkMeters))} on foot)<small>${walkingStep(k + 1, it.transferWalkMeters)} · transfer is inferred from unverified traces</small></div></li>`);
     });
-    steps.push(`<li class="step"><span class="step-icon" aria-hidden="true">🚶</span><div>Get off on the same side of the road as your destination, then walk about <b>${formatMeters(it.egressWalkMeters)}</b><small>${walkNote(it.egressWalkMeters)}</small></div></li>`);
-    const title = it.transfers === 0 ? 'Direct ride (draft)' : `${it.transfers} transfer (draft)`;
-    return `<section class="card itinerary${i === selectedIndex ? ' is-selected' : ''}"><h3>${title}${i === 0 ? ' <span class="badge">Nearest start &amp; drop-off</span>' : ''}${it.isFastest ? ' <span class="badge badge-fast">Fastest (estimated)</span>' : ''}</h3>
-      <p class="summary"><b>≈ ${it.estimatedMinutes} min</b> (rough estimate) · walking ≈ ${formatMeters(it.totalWalkMeters)} · ride ≈ ${formatMeters(it.approxRideMeters)} along the line</p>
+    const lastWalk = it.walkLines.length - 1;
+    const [destLng, destLat] = result.destination ?? it.walkLines[lastWalk]?.at(-1) ?? [null, null];
+    const [walkStartLng, walkStartLat] = it.legs.at(-1)?.alightPoint ?? [null, null];
+    const crossingHelp = (result.crossingFacilities ?? []).filter((facility) => facility.distanceMeters <= 1200).slice(0, 3).map((facility) => {
+      const [facilityLng, facilityLat] = facility.coordinates;
+      const url = `https://www.google.com/maps/dir/?api=1&origin=${walkStartLat},${walkStartLng}&destination=${destLat},${destLng}&waypoints=${facilityLat},${facilityLng}&travelmode=walking`;
+      return `<li>${escapeHtml(facility.kind)}${facility.name !== facility.kind ? ` · ${escapeHtml(facility.name)}` : ''}, about ${formatMeters(facility.distanceMeters)} from destination — <a href="${url}" target="_blank" rel="noopener noreferrer">walking directions via this point</a> · <a href="${escapeHtml(facility.osmUrl)}" target="_blank" rel="noopener noreferrer">OSM map</a></li>`;
+    }).join('');
+    const crossingList = crossingHelp
+      ? ` Nearby OpenStreetMap-mapped pedestrian facilities (check access and conditions in person):<ul>${crossingHelp}</ul>`
+      : '';
+    steps.push(`<li class="step"><span class="step-icon" aria-hidden="true">🚶</span><div>Walk about <b>${formatMeters(walkMeters(lastWalk, it.egressWalkMeters))}</b> from the approximate drop-off to your destination<small>${walkingStep(lastWalk, it.egressWalkMeters)} · crossing safety is not assessed.${crossingList}</small></div></li>`);
+    const title = it.transfers === 0 ? 'Direct ride (draft)' : `${it.transfers} ${it.transfers === 1 ? 'transfer' : 'transfers'} (draft)`;
+    return `<section class="card itinerary${i === selectedIndex ? ' is-selected' : ''}"><h3>${title}${i === 0 ? ' <span class="badge">Recommended option</span>' : ''}${it.isFastest ? ' <span class="badge badge-fast">Fastest (estimated)</span>' : ''}${it.isLeastWalking ? ' <span class="badge">Least walking</span>' : ''}</h3>
+      <p class="summary"><b>≈ ${it.estimatedMinutes} min</b> (rough estimate) · ${it.legs.length} jeepney ride${it.legs.length === 1 ? '' : 's'} · walking ≈ ${formatMeters(it.routedWalkMeters ?? it.totalWalkMeters)} · ride ≈ ${formatMeters(it.approxRideMeters)} · fare data unavailable</p>
       <ol class="steps">${steps.join('')}</ol>
       <button type="button" class="btn btn-secondary" data-draft-itinerary="${i}" aria-pressed="${i === selectedIndex}">Show on map</button></section>`;
   }).join('');

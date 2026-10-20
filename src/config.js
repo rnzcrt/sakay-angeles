@@ -20,8 +20,9 @@ export const SERVICE_AREA_BBOX = [120.47, 15.07, 120.68, 15.25];
 export const PLANNER_DEFAULTS = {
   // Maximum straight-line walk from the user's point to a boarding/alighting stop.
   maxWalkMeters: 500,
-  // Maximum number of transfers (0 = direct only).
-  maxTransfers: 2,
+  // Upper bound; the planner also stops when every distinct route has been used.
+  // This allows long useful chains instead of assuming two transfers is enough.
+  maxTransfers: 10,
   // Nearest candidate stops considered at each end.
   maxStopCandidates: 5,
   // Alternatives shown to the user.
@@ -75,4 +76,20 @@ export const ROUTING_CONFIG = {
   timeoutMs: 8000,
   minIntervalMs: 350,
   attribution: 'Road snapping: OSRM demo server, data © OpenStreetMap contributors',
+};
+
+// Public OSRM pedestrian router for itinerary walking legs. It is a light-use
+// demo service, so production deployments should self-host or use a contracted provider.
+export const WALKING_ROUTING_CONFIG = {
+  baseUrl: 'https://routing.openstreetmap.de/routed-foot/route/v1/driving',
+  timeoutMs: 10000,
+  attribution: 'Walking routes: OSRM · © OpenStreetMap contributors',
+};
+
+// Nearby crossings and grade-separated pedestrian routes from OpenStreetMap.
+export const PEDESTRIAN_FACILITIES_CONFIG = {
+  endpoint: 'https://overpass-api.de/api/interpreter',
+  radiusMeters: 1200,
+  timeoutMs: 8000,
+  attribution: 'Pedestrian facilities: © OpenStreetMap contributors',
 };

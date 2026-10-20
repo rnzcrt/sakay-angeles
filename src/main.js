@@ -1,5 +1,5 @@
 import './styles.css';
-import { SOURCE_ATTRIBUTION, MAP_CONFIG, GEOCODING_CONFIG } from './config.js';
+import { SOURCE_ATTRIBUTION, MAP_CONFIG, GEOCODING_CONFIG, WALKING_ROUTING_CONFIG, DRAFT_TIME } from './config.js';
 import { loadData } from './data/loadData.js';
 import { mergeLocalDrafts, setIgnoreLocal } from './data/localDrafts.js';
 import { planTrip, buildGraph, PLAN_STATUS } from './routing/planner.js';
@@ -7,12 +7,15 @@ import { createMap } from './map/createMap.js';
 import { addRouteLayers, applyVisibility, onRouteClick, fitToRoutes, makeMarker, addTripLayers, setTripGeometry, fitToCoordinates } from './map/routeLayers.js';
 import { requestLocation } from './services/geolocation.js';
 import { searchPlaces } from './services/geocoding.js';
+import { routeWalking } from './services/walking.js';
+import { findNearbyPedestrianFacilities } from './services/pedestrianFacilities.js';
 import { renderRouteItem, renderRouteDetail, routeHasGeometry } from './ui/routeList.js';
 import { renderPlanResult, renderGeocodeChoices, renderDraftResult } from './ui/tripResults.js';
 import { buildDraftLines, planDraftTrip, DRAFT_STATUS } from './routing/draftPlanner.js';
 import { renderReferenceMaps } from './ui/referenceMaps.js';
 import { createNotifier } from './ui/notifications.js';
 import { escapeHtml } from './ui/html.js';
+import { haversineMeters } from './routing/geo.js';
 
 const $ = (id) => document.getElementById(id);
 const notify = createNotifier({ statusEl: $('status-live'), alertEl: $('alert-banner') });
@@ -27,6 +30,7 @@ const state = {
   points: { origin: null, destination: null }, // { coordinates, label }
   markers: { origin: null, destination: null },
   stopMarkers: [],
+  terminalMarkers: [],
   pick: null, // { target, sequence }
   result: null,
   selectedItinerary: 0,
@@ -37,10 +41,11 @@ const state = {
   storage: null,
   draftResult: null,
   draftIndex: 0,
+  draftRenderToken: 0,
 };
 
 $('source-note').textContent = `${SOURCE_ATTRIBUTION.text} ${SOURCE_ATTRIBUTION.permissionNote}`;
-$('attribution-note').textContent = `${MAP_CONFIG.attributionText} · ${GEOCODING_CONFIG.attribution}`;
+$('attribution-note').textContent = `${MAP_CONFIG.attributionText} · ${GEOCODING_CONFIG.attribution} · ${WALKING_ROUTING_CONFIG.attribution} · © OpenStreetMap contributors`;
 renderReferenceMaps($('ref-list'));
 
 // ---------- rendering ----------
@@ -49,7 +54,7 @@ const routesWithGeometry = () => state.data.routes.filter((r) => routeHasGeometr
 function renderLegend() {
   const hasLines = routesWithGeometry().length > 0;
   $('map-legend').innerHTML = `<strong>Map guide</strong>
-    <div class="legend-row"><span class="legend-solid"></span> Verified route line</div>
+    <div class="legend-row"><span class="legend-terminal"></span> Verified terminal (A/B)</div>
     <div class="legend-row"><span class="legend-dash"></span> Illustrative draft (unverified)</div>
     ${hasLines ? '' : '<div class="legend-row">No route lines have been digitized yet.</div>'}`;
 }
@@ -76,8 +81,8 @@ function localNote() {
 
 function renderDataBanner() {
   const { routes } = state.data;
-  const usable = new Set(state.graph.directions.map((d) => d.routeId)).size;
-  $('data-banner').innerHTML = `<b>Prototype data notice.</b> ${routes.length} routes are listed from the source legend; <b>${usable}</b> ${usable === 1 ? 'has' : 'have'} verified stops and geometry that can be used for trip suggestions. ${usable === 0 ? 'Trip suggestions are unavailable until route data is verified — you can still browse routes and the reference maps.' : ''}` + localNote();
+  const terminals = state.data.stops.filter((stop) => stop.kind === 'terminal' && stop.verificationStatus === 'verified').length;
+  $('data-banner').innerHTML = `<b>Route data notice.</b> ${terminals} terminal locations (A/B) are verified from your real-world observations. Route paths, intermediate boarding/drop-off points and transfers are approximate; ask locally about current service.` + localNote();
 }
 
 function syncMap() {
@@ -225,24 +230,85 @@ function clearTripGeometry() {
   if (state.mapReady) setTripGeometry(state.map);
 }
 
-function showDraftItinerary(index) {
-  const it = state.draftResult.itineraries[index];
-  state.draftIndex = index;
-  // Cut the map down to what matters: hide whole routes, draw only the ridden stretches.
+function paintDraftItinerary(result, selected) {
+  const selectedIndex = Math.max(0, result.itineraries.indexOf(selected));
+  selected = result.itineraries[selectedIndex];
+  state.draftIndex = selectedIndex;
   state.visible = new Set();
   clearStopMarkers();
   if (state.mapReady) {
-    setTripGeometry(state.map, it.legs, it.walkLines);
-    it.legs.forEach((l) => {
+    setTripGeometry(state.map, selected.legs, selected.walkLines);
+    selected.legs.forEach((l) => {
       state.stopMarkers.push(makeMarker(state.map, 'stop', l.boardPoint, `Approximate boarding point on ${l.routeName}`));
       state.stopMarkers.push(makeMarker(state.map, 'stop', l.alightPoint, `Approximate drop-off point on ${l.routeName}`));
     });
-    fitToCoordinates(state.map, [...it.legs.flatMap((l) => l.segment), ...it.walkLines.flat()]);
+    for (const facility of result.crossingFacilities ?? []) {
+      const kind = facility.kind.toLowerCase().includes('bridge') ? 'bridge'
+        : facility.kind.toLowerCase().includes('underpass') ? 'underpass' : 'crossing';
+      state.stopMarkers.push(makeMarker(state.map, kind, facility.coordinates, `${facility.kind}${facility.name !== facility.kind ? ` · ${facility.name}` : ''} · mapped in OpenStreetMap`));
+    }
+    fitToCoordinates(state.map, [...selected.legs.flatMap((l) => l.segment), ...selected.walkLines.flat(), ...(result.crossingFacilities ?? []).map((f) => f.coordinates)]);
   }
-  $('results').innerHTML = renderDraftResult(state.draftResult, index) +
+  $('results').innerHTML = renderDraftResult(result, selectedIndex) +
     '<button type="button" class="btn btn-ghost" id="show-network-btn">Show the whole network</button>';
   renderRouteList();
   syncMap();
+}
+
+function showDraftItinerary(index) {
+  const result = state.draftResult;
+  const candidates = result.candidates ?? result.itineraries;
+  let selected = result.itineraries[index] ?? candidates[0];
+  const token = ++state.draftRenderToken;
+  candidates.sort((a, b) => a.estimatedMinutes - b.estimatedMinutes || a.totalWalkMeters - b.totalWalkMeters || a.transfers - b.transfers || a.id.localeCompare(b.id));
+  const displayLimit = result.displayLimit ?? 3;
+  result.candidates = candidates;
+  result.itineraries = candidates.slice(0, displayLimit);
+  if (!result.itineraries.includes(selected)) selected = result.itineraries[0];
+  candidates.forEach((option, i) => { option.isFastest = i === 0; });
+  // Show the route immediately. Pedestrian routing is an enhancement and must
+  // never leave the user staring at an empty result while public APIs respond.
+  paintDraftItinerary(result, selected);
+
+  if (!result.crossingFacilitiesPromise && result.destination) {
+    result.crossingFacilitiesPromise = findNearbyPedestrianFacilities(result.destination).then((facilities) => {
+      result.crossingFacilities = facilities;
+      if (state.draftResult === result) {
+        paintDraftItinerary(result, result.itineraries[state.draftIndex]);
+      }
+    });
+  }
+
+  let nextCandidate = 0;
+  void Promise.all(Array.from({ length: Math.min(8, candidates.length) }, async () => {
+    while (nextCandidate < candidates.length) {
+      const option = candidates[nextCandidate++];
+      if (option.walkPromise) { await option.walkPromise; continue; }
+      const straightLines = option.walkLines;
+      option.walkPromise = Promise.all(straightLines.map((line) => routeWalking(line[0], line.at(-1)))).then((walkRoutes) => {
+        option.walkRoutes = walkRoutes;
+        option.routedWalkMeters = Math.round(walkRoutes.reduce((sum, route, i) => sum + (route?.distanceMeters ?? haversineMeters(straightLines[i][0], straightLines[i].at(-1))), 0));
+        option.walkLines = straightLines.map((line, i) => walkRoutes[i]?.coordinates ?? line);
+        const walkMinutes = walkRoutes.reduce((sum, route, i) => sum + (route?.durationSeconds ? route.durationSeconds / 60 : (haversineMeters(straightLines[i][0], straightLines[i].at(-1)) / 1000 / DRAFT_TIME.walkKmh) * 60), 0);
+        option.estimatedMinutes = Math.max(1, Math.round(option.walkingOnly
+          ? walkMinutes
+          : walkMinutes + (option.approxRideMeters / 1000 / DRAFT_TIME.jeepneyKmh) * 60 + DRAFT_TIME.waitPerBoardingMin * option.legs.length));
+      });
+      await option.walkPromise;
+    }
+  })).then(() => {
+    if (state.draftResult !== result || state.draftRenderToken !== token) return;
+    candidates.sort((a, b) => a.estimatedMinutes - b.estimatedMinutes || a.routedWalkMeters - b.routedWalkMeters || a.transfers - b.transfers || a.id.localeCompare(b.id));
+    candidates.forEach((option, i) => { option.isFastest = i === 0; });
+    const leastWalking = [...candidates].sort((a, b) => (a.routedWalkMeters ?? a.totalWalkMeters) - (b.routedWalkMeters ?? b.totalWalkMeters) || a.estimatedMinutes - b.estimatedMinutes)[0];
+    candidates.forEach((option) => { option.isLeastWalking = option === leastWalking; });
+    result.itineraries = candidates.slice(0, displayLimit);
+    if (!result.itineraries.includes(selected)) selected = result.itineraries[0];
+    paintDraftItinerary(result, selected);
+    notify.status(candidates.some((option) => option.walkRoutes?.some(Boolean))
+      ? 'Pedestrian paths loaded; route times and walking distances were updated.'
+      : 'Pedestrian routing was unavailable; straight-line walking estimates are shown.');
+  });
 }
 
 async function findRoute() {
@@ -253,6 +319,8 @@ async function findRoute() {
       if (!ok) { notify.alert(`Choose your ${w === 'origin' ? 'starting point' : 'destination'} from the search results first.`); return; }
     }
   }
+  notify.status('Searching the full jeepney network and connected transfers…');
+  await new Promise((resolve) => requestAnimationFrame(resolve));
   const result = planTrip({
     origin: state.points.origin?.coordinates,
     destination: state.points.destination?.coordinates,
@@ -264,11 +332,12 @@ async function findRoute() {
     showItinerary(0);
     notify.status(`${result.itineraries.length} journey option${result.itineraries.length === 1 ? '' : 's'} found.`);
   } else if (result.status === PLAN_STATUS.NO_VERIFIED_ROUTE && state.draftLines.length) {
-    const draft = planDraftTrip({ origin: state.points.origin.coordinates, destination: state.points.destination.coordinates, lines: state.draftLines });
+    const draft = planDraftTrip({ origin: state.points.origin.coordinates, destination: state.points.destination.coordinates, lines: state.draftLines, options: { candidateLimit: 48 } });
+    draft.destination = state.points.destination.coordinates;
     state.draftResult = draft;
     if (draft.status === DRAFT_STATUS.SUCCESS) {
       showDraftItinerary(0);
-      notify.status(`${draft.itineraries.length} draft suggestion${draft.itineraries.length === 1 ? '' : 's'} found. These are unverified.`);
+      notify.status(`${Math.min(draft.displayLimit ?? 3, draft.itineraries.length)} draft route options shown. Walking times will update as pedestrian paths load.`);
     } else {
       clearStopMarkers();
       clearTripGeometry();
@@ -312,6 +381,15 @@ function bindEvents() {
   $('find-btn').onclick = findRoute;
   $('origin-form').addEventListener('submit', (e) => { e.preventDefault(); runSearch('origin'); });
   $('dest-form').addEventListener('submit', (e) => { e.preventDefault(); runSearch('destination'); });
+  $('dest-form').addEventListener('click', (e) => {
+    const quick = e.target.closest('[data-popular-place]');
+    if (!quick) return;
+    $('destination').value = quick.dataset.popularPlace;
+    clearPoint('destination');
+    runSearch('destination').then((ok) => {
+      if (ok && state.points.origin && state.points.destination) findRoute();
+    });
+  });
   $('origin').addEventListener('input', () => clearPoint('origin'));
   $('destination').addEventListener('input', () => clearPoint('destination'));
   document.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => startPick(b.dataset.pick)));
@@ -380,6 +458,9 @@ async function start() {
     addTripLayers(map);
     onRouteClick(map, (id) => { if (!state.pick) selectRoute(id); });
     state.mapReady = true;
+    for (const terminal of state.data.stops.filter((stop) => stop.kind === 'terminal' && stop.verificationStatus === 'verified')) {
+      state.terminalMarkers.push(makeMarker(map, 'terminal', terminal.coordinates, `${terminal.name} · verified from user observation`));
+    }
     syncMap();
     fitToRoutes(map, state.data.geojson, null);
   });

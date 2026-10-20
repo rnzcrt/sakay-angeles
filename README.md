@@ -2,7 +2,7 @@
 
 A mobile-friendly web prototype for exploring jeepney routes in Angeles City, Pampanga, Philippines, built around the supplied *HERE Angeles + Clark* route maps.
 
-> **Honest status:** this is **not** a navigation service. The 11 route names/colors are transcribed from the legend image, but **no route has digitized geometry, verified stops, directions or transfers yet**. The app therefore lists and explains routes, lets you open the reference maps, and answers trip requests with *“We don't have enough verified route data to recommend a reliable trip yet.”* It never invents a route. It shows no live vehicle positions, arrival times, fares or authoritative directions.
+> **Honest status:** this is **not** a navigation service. The A/B terminal endpoints on the supplied route traces are verified from the project owner's real-world observations. The traced path between endpoints, intermediate boarding/drop-off points, service directions, and transfers still need verification. The app shows those limits in trip suggestions and does not show live vehicles, arrival times, fares or authoritative directions.
 
 ## Stack
 Vite · plain JavaScript modules · [MapLibre GL JS](https://maplibre.org/) · [OpenFreeMap](https://openfreemap.org/) public style (no API key) · static JSON/GeoJSON data · Node's built-in test runner.
@@ -41,12 +41,14 @@ In the app, each part is ridden only in its traced order. When Route 1 and Route
 The **⇅ Switch trip** button swaps start and destination and searches again. Routes are ridden in their traced order, so a switched trip uses Route 2 for the way back (or rides the jeepney round the loop the long way if that is the only way).
 
 ## Draft suggestions
-Every route has a hand-traced draft line but none has verified stops, so when the verified planner has nothing to offer the app automatically falls back to `src/routing/draftPlanner.js`:
-- **It always tries to give a route.** If your start or destination is far from the traced lines, the result begins with a walk to the nearest route and ends with a walk from the drop-off. Walking up to 5 km is allowed; steps over 800 m are labelled as long walks with the walking time. Beyond that the app says how far away the nearest route is.
-- **Order of options:** the option with the **nearest start and drop-off** (least walking) comes first and is selected automatically. The quickest option (rough estimate: ~4.5 km/h walking, ~12 km/h by jeepney, a few minutes' wait per ride; see `DRAFT_TIME`) is badged “Fastest (estimated)”.
+Every route has a hand-traced line and verified terminal endpoints, but intermediate stops and directions are not modelled as a verified stop sequence. When the verified planner has nothing to offer the app automatically falls back to `src/routing/draftPlanner.js`:
+- The route line displays immediately; pedestrian routing updates distances and times in the background. Walking access/egress is capped at 1.8 km, and route-to-route transfers are considered within 500 m.
+- **Order of options:** after the walking legs are routed over the pedestrian network, options are ranked by estimated door-to-door time. The displayed walk distance and directions use the pedestrian route when available.
 - **Same side of the road:** the boarding and drop-off points are shifted about 10 m (`kerbMeters`) toward you / your destination, so the stop is on your side of the road.
-- One connection is allowed where two lines come within 150 m, and each part of a transfer trip must be at least 300 m long. Route 1 + Route 2 that join up act as one jeepney going round.
-Results are labelled *draft*, give no stop names, and are **not** a substitute for verified data. The verified planner itself is unchanged and still refuses unverified data.
+- Draft suggestions search the full traced-line network and can chain any number of distinct jeepney routes. A possible transfer is inferred when different route lines come within 150 m; it is not a verified stop or transfer. Route 1 + Route 2 that join up act as one jeepney going round.
+- Walking legs request pedestrian paths and turn instructions from the public OSRM foot router (`WALKING_ROUTING_CONFIG`). A straight-line guide is used if the service is unavailable. The public router is for light use; self-host or use a contracted service for production.
+- The app searches OpenStreetMap for nearby mapped crossings, footbridges and underpasses. It offers walking directions through mapped facilities and marks them on the map; mapping coverage and real-world access must still be checked. [OpenStreetMap crossing tags](https://wiki.openstreetmap.org/wiki/Key:crossing) · [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API).
+Results are labelled *draft*. Terminal locations are shown as verified; boarding/drop-off points along the line and transfers are estimates. This is not a substitute for a fully surveyed stop sequence. The verified planner itself is unchanged and still requires ordered verified stop data.
 
 ## Repository layout
 ```text
@@ -78,7 +80,7 @@ Source labels are preserved as printed (e.g. “SAPANG BATO - ANGLES”, “PAND
 - nodes are stops; ride edges join consecutive stops of one *directional* route variant (nothing is assumed two-way);
 - a transfer exists only at the **same verified stop id** or via an explicit verified `transfers` record — never from proximity or similar landmark names;
 - your start/end snap to boarding/alighting stops within 500 m straight-line (configurable); a stop that cannot be boarded/alighted in the needed direction does not count;
-- depth-first search up to 2 transfers (configurable), de-duplicated, ranked by **transfers → total walking → approximate ride distance → id**;
+- depth-first search up to 10 transfers for this 11-route dataset, de-duplicated, ranked by total estimated time and then walking/transfer count;
 - outcomes: `success`, `no_verified_route`, `origin_too_far_from_stop`, `destination_too_far_from_stop`, `invalid_input`, `data_error`.
 
 Distances are straight-line estimates. No travel times are produced.

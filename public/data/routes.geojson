@@ -1,6 +1,6 @@
 {
   "type": "FeatureCollection",
-  "note": "Illustrative DRAFT route lines traced by hand. Not verified; not used for verified trip planning.",
+  "note": "Route path traces are illustrative; A/B terminal endpoint locations are verified from the user’s real-world observations.",
   "features": [
     {
       "type": "Feature",
@@ -10,7 +10,11 @@
         "geometryId": "m-gate-friendship-a-draft",
         "direction": "a",
         "oneWay": false,
-        "draft": true
+        "draft": true,
+        "startStopId": "m-gate-friendship-terminal-a",
+        "endStopId": "m-gate-friendship-terminal-b",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -330,7 +334,11 @@
         "geometryId": "m-gate-friendship-b-draft",
         "direction": "b",
         "oneWay": false,
-        "draft": true
+        "draft": true,
+        "startStopId": "m-gate-friendship-terminal-b",
+        "endStopId": "m-gate-friendship-terminal-a",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -650,7 +658,11 @@
         "geometryId": "checkpoint-balibago-highway-a-draft",
         "direction": "a",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "checkpoint-balibago-highway-terminal-a",
+        "endStopId": "checkpoint-balibago-highway-terminal-b",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -1614,7 +1626,11 @@
         "geometryId": "checkpoint-balibago-highway-b-draft",
         "direction": "b",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "checkpoint-balibago-highway-terminal-b",
+        "endStopId": "checkpoint-balibago-highway-terminal-endpoint-3",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -2374,7 +2390,11 @@
         "geometryId": "checkpoint-hensonville-holy-a-draft",
         "direction": "a",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "checkpoint-hensonville-holy-terminal-a",
+        "endStopId": "checkpoint-hensonville-holy-terminal-b",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -2946,7 +2966,11 @@
         "geometryId": "checkpoint-hensonville-holy-b-draft",
         "direction": "b",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "checkpoint-hensonville-holy-terminal-b",
+        "endStopId": "checkpoint-hensonville-holy-terminal-endpoint-3",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -3454,7 +3478,11 @@
         "geometryId": "sm-checkpoint-holy-highway-a-draft",
         "direction": "a",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "sm-checkpoint-holy-highway-terminal-a",
+        "endStopId": "sm-checkpoint-holy-highway-terminal-b",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -4426,7 +4454,11 @@
         "geometryId": "sm-checkpoint-holy-highway-b-draft",
         "direction": "b",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "sm-checkpoint-holy-highway-terminal-b",
+        "endStopId": "sm-checkpoint-holy-highway-terminal-endpoint-3",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -5438,7 +5470,11 @@
         "geometryId": "clark-main-gate-dau-a-draft",
         "direction": "a",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "clark-main-gate-dau-terminal-a",
+        "endStopId": "clark-main-gate-dau-terminal-b",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -6034,7 +6070,11 @@
         "geometryId": "clark-main-gate-dau-b-draft",
         "direction": "b",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "clark-main-gate-dau-terminal-b",
+        "endStopId": "clark-main-gate-dau-terminal-endpoint-3",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -6430,7 +6470,11 @@
         "geometryId": "marisol-pampang-a-draft",
         "direction": "a",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "marisol-pampang-terminal-a",
+        "endStopId": "marisol-pampang-terminal-b",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -6878,7 +6922,11 @@
         "geometryId": "marisol-pampang-b-draft",
         "direction": "b",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "marisol-pampang-terminal-b",
+        "endStopId": "marisol-pampang-terminal-a",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -7310,7 +7358,11 @@
         "geometryId": "sapang-bato-angeles-a-draft",
         "direction": "a",
         "oneWay": false,
-        "draft": true
+        "draft": true,
+        "startStopId": "sapang-bato-angeles-terminal-a",
+        "endStopId": "sapang-bato-angeles-terminal-b",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -7966,7 +8018,11 @@
         "geometryId": "sapang-bato-angeles-b-draft",
         "direction": "b",
         "oneWay": false,
-        "draft": true
+        "draft": true,
+        "startStopId": "sapang-bato-angeles-terminal-b",
+        "endStopId": "sapang-bato-angeles-terminal-a",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -8622,7 +8678,11 @@
         "geometryId": "pandang-pampang-a-draft",
         "direction": "a",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "pandang-pampang-terminal-a",
+        "endStopId": "pandang-pampang-terminal-b",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -9366,7 +9426,11 @@
         "geometryId": "pandang-pampang-b-draft",
         "direction": "b",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "pandang-pampang-terminal-b",
+        "endStopId": "pandang-pampang-terminal-endpoint-3",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -10310,7 +10374,11 @@
         "geometryId": "sunset-nepo-a-draft",
         "direction": "a",
         "oneWay": false,
-        "draft": true
+        "draft": true,
+        "startStopId": "sunset-nepo-terminal-a",
+        "endStopId": "sunset-nepo-terminal-b",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -10742,7 +10810,11 @@
         "geometryId": "sunset-nepo-b-draft",
         "direction": "b",
         "oneWay": false,
-        "draft": true
+        "draft": true,
+        "startStopId": "sunset-nepo-terminal-b",
+        "endStopId": "sunset-nepo-terminal-a",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -11174,7 +11246,11 @@
         "geometryId": "villa-pampang-a-draft",
         "direction": "a",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "villa-pampang-terminal-a",
+        "endStopId": "villa-pampang-terminal-b",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -11590,7 +11666,11 @@
         "geometryId": "villa-pampang-b-draft",
         "direction": "b",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "villa-pampang-terminal-b",
+        "endStopId": "villa-pampang-terminal-endpoint-3",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -12010,7 +12090,11 @@
         "geometryId": "capaya-angeles-a-draft",
         "direction": "a",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "capaya-angeles-terminal-a",
+        "endStopId": "capaya-angeles-terminal-b",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",
@@ -12570,7 +12654,11 @@
         "geometryId": "capaya-angeles-b-draft",
         "direction": "b",
         "oneWay": true,
-        "draft": true
+        "draft": true,
+        "startStopId": "capaya-angeles-terminal-b",
+        "endStopId": "capaya-angeles-terminal-a",
+        "endpointVerificationStatus": "verified",
+        "endpointSource": "User real-world observation"
       },
       "geometry": {
         "type": "LineString",

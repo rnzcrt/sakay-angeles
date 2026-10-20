@@ -37,6 +37,20 @@ test('draft transfer only where lines actually come close', () => {
   assert.ok(it.transferWalkMeters <= 150);
 });
 
+test('planner chains three distinct jeepney routes through two physical intersections', () => {
+  const routes3 = [...routes, rt('X')];
+  const network = buildDraftLines({ features: [
+    feat('H', [[0, 0], [0.03, 0]]),
+    feat('V', [[0.03, 0], [0.03, 0.04]]),
+    feat('X', [[0.03, 0.04], [0.07, 0.04]]),
+  ] }, routes3);
+  const r = planAny({ origin: [0.002, 0], destination: [0.068, 0.04], lines: network, options: { maxWalkMeters: 500 } });
+  assert.equal(r.status, DRAFT_STATUS.SUCCESS);
+  const chained = r.itineraries.find((it) => it.legs.length === 3 && it.legs.map((l) => l.routeId).join(',') === 'H,V,X');
+  assert.ok(chained, `expected H→V→X; got ${r.itineraries.map((it) => it.id).join(' / ')}`);
+  assert.equal(chained.transfers, 2);
+});
+
 test('no match when lines do not connect or points are far', () => {
   assert.equal(planDraftTrip({ origin: [0.005, 0.0005], destination: [0.2, 0.2005], lines }).status, DRAFT_STATUS.NONE);
   assert.equal(planDraftTrip({ origin: [0.5, 0.5], destination: [0.045, 0.0005], lines }).status, DRAFT_STATUS.NONE);
@@ -46,7 +60,9 @@ test('no match when lines do not connect or points are far', () => {
 });
 
 test('too-short rides, invalid input and no lines are handled', () => {
-  assert.equal(planDraftTrip({ origin: [0.005, 0.0005], destination: [0.006, 0.0005], lines }).status, DRAFT_STATUS.NONE);
+  const short = planDraftTrip({ origin: [0.005, 0.0005], destination: [0.006, 0.0005], lines });
+  assert.equal(short.status, DRAFT_STATUS.SUCCESS);
+  assert.ok(short.itineraries.some((it) => it.walkingOnly), 'a short walk should avoid an unnecessary fare');
   assert.equal(planDraftTrip({ origin: null, destination: [0, 0], lines }).status, 'invalid_input');
   assert.equal(planDraftTrip({ origin: [0, 0], destination: [0.01, 0], lines: [] }).status, DRAFT_STATUS.NO_LINES);
 });
@@ -54,10 +70,10 @@ test('too-short rides, invalid input and no lines are handled', () => {
 test('draft results are always rendered with an unverified warning and route metadata', () => {
   const r = planDraftTrip({ origin: [0.005, 0.0005], destination: [0.045, 0.0005], lines });
   const html = renderDraftResult(r);
-  assert.match(html, /Draft guidance only/);
+  assert.match(html, /Terminal locations A\/B are verified/);
   assert.match(html, /unverified/);
   assert.match(html, /Route H/);
-  assert.match(renderDraftResult({ status: 'draft_none', message: 'x', itineraries: [] }), /Draft guidance only/);
+  assert.match(renderDraftResult({ status: 'draft_none', message: 'x', itineraries: [] }), /boarding and drop-off points along the route/);
 });
 
 test('each leg carries only the ridden segment, ordered from boarding to getting off', () => {
@@ -243,6 +259,6 @@ test('results label long walks and show the nearest/fastest badges', () => {
   const html = renderDraftResult(r);
   assert.match(html, /a long walk/);
   assert.match(html, /on foot/);
-  assert.match(html, /Nearest start &amp; drop-off/);
-  assert.match(html, /same side of the road as your destination/);
+  assert.match(html, /Least walking/);
+  assert.match(html, /approximate drop-off to your destination/);
 });

@@ -32,6 +32,11 @@ h1{font-size:1.7rem;line-height:1.15;letter-spacing:-.03em;margin:6px 0 12px}
 .field-row{display:flex;gap:8px}
 input[type=text]{flex:1;min-width:0;height:46px;border:1px solid #c4cec3;border-radius:10px;padding:0 12px;font-size:1rem;background:#fff;color:var(--ink)}
 .field-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.popular-places{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 4px;align-items:center}
+.popular-places .field-label{flex-basis:100%;margin:0}
+.place-chip{border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--green-d);padding:6px 10px;min-height:34px;font:inherit;font-size:.78rem;cursor:pointer}
+.place-chip:hover,.place-chip:focus-visible{background:#eef7f2;border-color:var(--green)}
+.walk-turns{margin-top:4px}.walk-turns summary{cursor:pointer;color:var(--green-d);font-weight:700}.walk-turns ol{padding-left:20px;margin:4px 0}.walk-turns li{margin:3px 0}
 .btn{border:0;border-radius:10px;min-height:44px;padding:0 14px;font-weight:700;font-size:.9rem;cursor:pointer}
 .btn-primary{background:var(--green);color:#fff;flex:1}.btn-primary:hover{background:var(--green-d)}
 .btn-secondary{background:#edf4ef;color:var(--green-d)}
@@ -68,12 +73,15 @@ input[type=text]{flex:1;min-width:0;height:46px;border:1px solid #c4cec3;border-
 .map-legend{position:absolute;left:10px;bottom:28px;z-index:2;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;box-shadow:var(--shadow);font-size:.78rem;max-width:230px}
 .map-legend strong{display:block;margin-bottom:4px}.legend-row{display:flex;align-items:center;gap:8px;margin-top:4px}
 .legend-solid,.legend-dash{width:26px;height:0;border-top:4px solid #555}.legend-dash{border-top-style:dashed}
+.legend-terminal{width:11px;height:11px;border-radius:50%;background:#176b4d;border:2px solid #fff;box-shadow:0 0 0 1px #176b4d}
 .pick-banner{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:3;background:#17211c;color:#fff;border-radius:12px;padding:6px 6px 6px 14px;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow);font-size:.9rem;max-width:calc(100% - 20px)}
 .pick-banner .btn{min-height:36px}
 .map-fallback{position:absolute;inset:0;z-index:4;display:grid;place-items:center;text-align:center;padding:24px;background:#eef2ec;color:#38463d}
 .marker{width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;color:#fff;font-weight:800;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)}
 .marker>*{transform:rotate(45deg)}.marker-origin{background:#27865f}.marker-destination{background:#d9433b}
 .marker-stop{width:14px;height:14px;border-radius:50%;transform:none;background:#fff;border:3px solid #17211c;font-size:0}
+.marker-terminal{width:19px;height:19px;border-radius:50%;transform:none;background:#176b4d;border:2px solid #fff;font-size:9px;box-shadow:0 1px 4px rgba(0,0,0,.45)}
+.marker-crossing,.marker-bridge,.marker-underpass{width:22px;height:22px;border-radius:50%;transform:none;background:#1254a1;border:2px solid #fff;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,.45)}
 .map.picking canvas{cursor:crosshair!important}
 @media (max-width:850px){
   body{display:block;height:auto}html,body{height:auto}

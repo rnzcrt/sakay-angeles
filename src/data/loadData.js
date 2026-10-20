@@ -19,9 +19,12 @@ export async function loadData(baseUrl = './', fetchImpl = fetch) {
     ]);
     const data = {
       meta: { source: routesFile.source, dataStatus: routesFile.dataStatus },
-      routes: routesFile.routes,
       stops: stopsFile.stops,
       transfers: stopsFile.transfers ?? [],
+      routes: routesFile.routes.map((route) => ({
+        ...route,
+        verifiedTerminals: stopsFile.stops.filter((stop) => stop.routeId === route.id && stop.kind === 'terminal' && stop.verificationStatus === 'verified'),
+      })),
       geojson,
     };
     const validation = validateDataset(data);

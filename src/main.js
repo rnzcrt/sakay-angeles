@@ -1,5 +1,5 @@
 import './styles.css';
-import { SOURCE_ATTRIBUTION, MAP_CONFIG, GEOCODING_CONFIG, WALKING_ROUTING_CONFIG, DRAFT_TIME } from './config.js';
+import { MAP_CONFIG, DRAFT_TIME } from './config.js';
 import { loadData } from './data/loadData.js';
 import { mergeLocalDrafts, setIgnoreLocal } from './data/localDrafts.js';
 import { planTrip, buildGraph, PLAN_STATUS } from './routing/planner.js';
@@ -8,14 +8,15 @@ import { addRouteLayers, applyVisibility, onRouteClick, fitToRoutes, makeMarker,
 import { requestLocation } from './services/geolocation.js';
 import { searchPlaces } from './services/geocoding.js';
 import { routeWalking } from './services/walking.js';
+import { estimateItineraryFares } from './services/fares.js';
 import { findNearbyPedestrianFacilities } from './services/pedestrianFacilities.js';
 import { renderRouteItem, renderRouteDetail, routeHasGeometry } from './ui/routeList.js';
 import { renderPlanResult, renderGeocodeChoices, renderDraftResult } from './ui/tripResults.js';
 import { buildDraftLines, planDraftTrip, DRAFT_STATUS } from './routing/draftPlanner.js';
-import { renderReferenceMaps } from './ui/referenceMaps.js';
 import { createNotifier } from './ui/notifications.js';
 import { escapeHtml } from './ui/html.js';
 import { haversineMeters } from './routing/geo.js';
+import { buildFeedbackIssueUrl } from './services/feedback.js';
 
 const $ = (id) => document.getElementById(id);
 const notify = createNotifier({ statusEl: $('status-live'), alertEl: $('alert-banner') });
@@ -42,11 +43,10 @@ const state = {
   draftResult: null,
   draftIndex: 0,
   draftRenderToken: 0,
+  passengerType: 'regular',
 };
 
-$('source-note').textContent = `${SOURCE_ATTRIBUTION.text} ${SOURCE_ATTRIBUTION.permissionNote}`;
-$('attribution-note').textContent = `${MAP_CONFIG.attributionText} · ${GEOCODING_CONFIG.attribution} · ${WALKING_ROUTING_CONFIG.attribution} · © OpenStreetMap contributors`;
-renderReferenceMaps($('ref-list'));
+$('attribution-note').textContent = `Map data © OpenStreetMap contributors · ${MAP_CONFIG.attributionText}`;
 
 // ---------- rendering ----------
 const routesWithGeometry = () => state.data.routes.filter((r) => routeHasGeometry(r, state.data.geojson));
@@ -54,9 +54,10 @@ const routesWithGeometry = () => state.data.routes.filter((r) => routeHasGeometr
 function renderLegend() {
   const hasLines = routesWithGeometry().length > 0;
   $('map-legend').innerHTML = `<strong>Map guide</strong>
-    <div class="legend-row"><span class="legend-terminal"></span> Verified terminal (A/B)</div>
-    <div class="legend-row"><span class="legend-dash"></span> Illustrative draft (unverified)</div>
-    ${hasLines ? '' : '<div class="legend-row">No route lines have been digitized yet.</div>'}`;
+    <div class="legend-row"><span class="legend-terminal"></span> Terminal based on observation</div>
+    <div class="legend-row"><span class="legend-dash"></span> Route based on observation</div>
+    <div class="legend-row"><span class="legend-walk"></span> Walking path</div>
+    ${hasLines ? '' : '<div class="legend-row">Route details are still being added.</div>'}`;
 }
 
 function renderRouteList() {
@@ -68,6 +69,7 @@ function renderRouteList() {
 }
 
 function localNote() {
+  if (!import.meta.env.DEV) return '';
   const { used, hasLocal, ignored, replaced } = state.local;
   if (replaced) {
     return `<div class="local-note"><b>Showing only the routes you traced</b> (${used.length} of ${state.data.routes.length}); the old lines are hidden.<button type="button" id="local-toggle">Use the shipped file instead</button></div>`;
@@ -80,9 +82,7 @@ function localNote() {
 }
 
 function renderDataBanner() {
-  const { routes } = state.data;
-  const terminals = state.data.stops.filter((stop) => stop.kind === 'terminal' && stop.verificationStatus === 'verified').length;
-  $('data-banner').innerHTML = `<b>Route data notice.</b> ${terminals} terminal locations (A/B) are verified from your real-world observations. Route paths, intermediate boarding/drop-off points and transfers are approximate; ask locally about current service.` + localNote();
+  $('data-banner').innerHTML = `<b>Help improve Sakay Angeles!</b> We're building a community-powered jeepney guide. Some routes, fares, and directions may need corrections. Send feedback from a route suggestion so we can improve this guide.` + localNote();
 }
 
 function syncMap() {
@@ -98,7 +98,7 @@ function selectRoute(id) {
   if (route && has) {
     state.visible.add(route.id);
     if (state.mapReady) fitToRoutes(state.map, state.data.geojson, [route.id]);
-  } else if (route) notify.status(`${route.name}: no digitized line yet. See the details below and the reference maps.`);
+  } else if (route) notify.status(`${route.name}: route details are still being added.`);
   renderRouteList();
   syncMap();
 }
@@ -220,7 +220,7 @@ function showItinerary(index) {
     }
     fitToRoutes(state.map, state.data.geojson, [...state.visible]);
   }
-  $('results').innerHTML = renderPlanResult(state.result, index) +
+  $('results').innerHTML = renderPlanResult(state.result, index, { passengerType: state.passengerType }) +
     '<button type="button" class="btn btn-ghost" id="show-network-btn">Show the whole network</button>';
   renderRouteList();
   syncMap();
@@ -237,22 +237,46 @@ function paintDraftItinerary(result, selected) {
   state.visible = new Set();
   clearStopMarkers();
   if (state.mapReady) {
-    setTripGeometry(state.map, selected.legs, selected.walkLines);
+    const routedWalkLines = selected.walkRoutes?.flatMap((walk) => walk?.coordinates ? [walk.coordinates] : []) ?? [];
+    const mapUpdated = setTripGeometry(state.map, selected.legs, routedWalkLines);
+    if (import.meta.env.DEV) console.debug('[walking-map]', { status: mapUpdated ? 'updated' : 'source_unavailable', routedSegments: routedWalkLines.length });
     selected.legs.forEach((l) => {
-      state.stopMarkers.push(makeMarker(state.map, 'stop', l.boardPoint, `Approximate boarding point on ${l.routeName}`));
-      state.stopMarkers.push(makeMarker(state.map, 'stop', l.alightPoint, `Approximate drop-off point on ${l.routeName}`));
+      state.stopMarkers.push(makeMarker(state.map, 'stop', l.boardPoint, `Approximate boarding point for ${l.routeName}`));
+      state.stopMarkers.push(makeMarker(state.map, 'stop', l.alightPoint, `Approximate drop-off point for ${l.routeName}`));
     });
     for (const facility of result.crossingFacilities ?? []) {
       const kind = facility.kind.toLowerCase().includes('bridge') ? 'bridge'
         : facility.kind.toLowerCase().includes('underpass') ? 'underpass' : 'crossing';
       state.stopMarkers.push(makeMarker(state.map, kind, facility.coordinates, `${facility.kind}${facility.name !== facility.kind ? ` · ${facility.name}` : ''} · mapped in OpenStreetMap`));
     }
-    fitToCoordinates(state.map, [...selected.legs.flatMap((l) => l.segment), ...selected.walkLines.flat(), ...(result.crossingFacilities ?? []).map((f) => f.coordinates)]);
+    fitToCoordinates(state.map, [...selected.legs.flatMap((l) => l.segment), ...routedWalkLines.flat(), ...(result.crossingFacilities ?? []).map((f) => f.coordinates)]);
   }
-  $('results').innerHTML = renderDraftResult(result, selectedIndex) +
+  $('results').innerHTML = renderDraftResult(result, selectedIndex, { passengerType: state.passengerType }) +
     '<button type="button" class="btn btn-ghost" id="show-network-btn">Show the whole network</button>';
   renderRouteList();
   syncMap();
+}
+
+function rankDraftChoices(result, candidates, selected = null) {
+  candidates.sort((a, b) => a.estimatedMinutes - b.estimatedMinutes ||
+    (a.routedWalkMeters ?? a.totalWalkMeters) - (b.routedWalkMeters ?? b.totalWalkMeters) ||
+    a.transfers - b.transfers || a.id.localeCompare(b.id));
+  candidates.forEach((option, i) => { option.isFastest = i === 0; });
+  const leastWalking = [...candidates].sort((a, b) =>
+    (a.routedWalkMeters ?? a.totalWalkMeters) - (b.routedWalkMeters ?? b.totalWalkMeters) || a.estimatedMinutes - b.estimatedMinutes)[0];
+  const fareOptions = candidates.map((option) => ({ option, fares: estimateItineraryFares(option.legs, state.passengerType) }))
+    .filter(({ fares }) => fares.available)
+    .sort((a, b) => ((a.fares.totalFare ?? (a.fares.fareRange.min + a.fares.fareRange.max) / 2) - (b.fares.totalFare ?? (b.fares.fareRange.min + b.fares.fareRange.max) / 2)) || a.option.estimatedMinutes - b.option.estimatedMinutes);
+  const lowestFare = fareOptions[0]?.option ?? null;
+  candidates.forEach((option) => {
+    option.isLeastWalking = option === leastWalking;
+    option.isLowestFare = option === lowestFare;
+  });
+  const displayLimit = result.displayLimit ?? 3;
+  const chosen = [...new Set([selected, candidates[0], leastWalking, lowestFare, ...candidates].filter(Boolean))].slice(0, displayLimit);
+  result.candidates = candidates;
+  result.itineraries = chosen;
+  return chosen;
 }
 
 function showDraftItinerary(index) {
@@ -260,12 +284,9 @@ function showDraftItinerary(index) {
   const candidates = result.candidates ?? result.itineraries;
   let selected = result.itineraries[index] ?? candidates[0];
   const token = ++state.draftRenderToken;
-  candidates.sort((a, b) => a.estimatedMinutes - b.estimatedMinutes || a.totalWalkMeters - b.totalWalkMeters || a.transfers - b.transfers || a.id.localeCompare(b.id));
   const displayLimit = result.displayLimit ?? 3;
-  result.candidates = candidates;
-  result.itineraries = candidates.slice(0, displayLimit);
+  rankDraftChoices(result, candidates, selected);
   if (!result.itineraries.includes(selected)) selected = result.itineraries[0];
-  candidates.forEach((option, i) => { option.isFastest = i === 0; });
   // Show the route immediately. Pedestrian routing is an enhancement and must
   // never leave the user staring at an empty result while public APIs respond.
   paintDraftItinerary(result, selected);
@@ -285,10 +306,14 @@ function showDraftItinerary(index) {
       const option = candidates[nextCandidate++];
       if (option.walkPromise) { await option.walkPromise; continue; }
       const straightLines = option.walkLines;
-      option.walkPromise = Promise.all(straightLines.map((line) => routeWalking(line[0], line.at(-1)))).then((walkRoutes) => {
+      option.walkPromise = Promise.all(straightLines.map((line) => routeWalking(line[0], line.at(-1), {
+        onDiagnostic: (event) => { if (import.meta.env.DEV) console.debug('[walking-router]', event); },
+      }))).then((walkRoutes) => {
         option.walkRoutes = walkRoutes;
+        option.walkRoutingComplete = walkRoutes.every(Boolean);
         option.routedWalkMeters = Math.round(walkRoutes.reduce((sum, route, i) => sum + (route?.distanceMeters ?? haversineMeters(straightLines[i][0], straightLines[i].at(-1))), 0));
-        option.walkLines = straightLines.map((line, i) => walkRoutes[i]?.coordinates ?? line);
+        // Keep candidate connectors separate from display geometry. Only
+        // successful foot-network routes are drawn on the map.
         const walkMinutes = walkRoutes.reduce((sum, route, i) => sum + (route?.durationSeconds ? route.durationSeconds / 60 : (haversineMeters(straightLines[i][0], straightLines[i].at(-1)) / 1000 / DRAFT_TIME.walkKmh) * 60), 0);
         option.estimatedMinutes = Math.max(1, Math.round(option.walkingOnly
           ? walkMinutes
@@ -298,16 +323,14 @@ function showDraftItinerary(index) {
     }
   })).then(() => {
     if (state.draftResult !== result || state.draftRenderToken !== token) return;
-    candidates.sort((a, b) => a.estimatedMinutes - b.estimatedMinutes || a.routedWalkMeters - b.routedWalkMeters || a.transfers - b.transfers || a.id.localeCompare(b.id));
-    candidates.forEach((option, i) => { option.isFastest = i === 0; });
-    const leastWalking = [...candidates].sort((a, b) => (a.routedWalkMeters ?? a.totalWalkMeters) - (b.routedWalkMeters ?? b.totalWalkMeters) || a.estimatedMinutes - b.estimatedMinutes)[0];
-    candidates.forEach((option) => { option.isLeastWalking = option === leastWalking; });
-    result.itineraries = candidates.slice(0, displayLimit);
+    rankDraftChoices(result, candidates, selected);
     if (!result.itineraries.includes(selected)) selected = result.itineraries[0];
     paintDraftItinerary(result, selected);
-    notify.status(candidates.some((option) => option.walkRoutes?.some(Boolean))
-      ? 'Pedestrian paths loaded; route times and walking distances were updated.'
-      : 'Pedestrian routing was unavailable; straight-line walking estimates are shown.');
+    const anyPedestrianPath = candidates.some((option) => option.walkRoutes?.some(Boolean));
+    const anyMissingPedestrianPath = candidates.some((option) => option.walkRoutingComplete === false);
+    notify.status(anyMissingPedestrianPath
+      ? `${anyPedestrianPath ? 'Some walking directions loaded.' : 'Walking directions could not be loaded.'} Other walking distances are approximate.`
+      : 'Walking directions and estimated times were updated.');
   });
 }
 
@@ -332,12 +355,12 @@ async function findRoute() {
     showItinerary(0);
     notify.status(`${result.itineraries.length} journey option${result.itineraries.length === 1 ? '' : 's'} found.`);
   } else if (result.status === PLAN_STATUS.NO_VERIFIED_ROUTE && state.draftLines.length) {
-    const draft = planDraftTrip({ origin: state.points.origin.coordinates, destination: state.points.destination.coordinates, lines: state.draftLines, options: { candidateLimit: 48 } });
+    const draft = planDraftTrip({ origin: state.points.origin.coordinates, destination: state.points.destination.coordinates, lines: state.draftLines, options: { candidateLimit: 8 } });
     draft.destination = state.points.destination.coordinates;
     state.draftResult = draft;
     if (draft.status === DRAFT_STATUS.SUCCESS) {
       showDraftItinerary(0);
-      notify.status(`${Math.min(draft.displayLimit ?? 3, draft.itineraries.length)} draft route options shown. Walking times will update as pedestrian paths load.`);
+      notify.status(`${Math.min(draft.displayLimit ?? 3, draft.itineraries.length)} route options shown. Walking directions are updating.`);
     } else {
       clearStopMarkers();
       clearTripGeometry();
@@ -347,7 +370,7 @@ async function findRoute() {
   } else {
     clearStopMarkers();
     clearTripGeometry();
-    $('results').innerHTML = renderPlanResult(result);
+    $('results').innerHTML = renderPlanResult(result, 0, { passengerType: state.passengerType });
     notify.status(result.message);
   }
   $('results').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -355,6 +378,42 @@ async function findRoute() {
 
 // ---------- events ----------
 function bindEvents() {
+  document.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-report-routes]');
+    if (!trigger) return;
+    const form = $('feedback-form');
+    const routeNames = trigger.dataset.reportRouteNames ?? '';
+    form.elements.route.value = routeNames;
+    form.elements.origin.value = state.points.origin?.label ?? '';
+    form.elements.destination.value = state.points.destination?.label ?? '';
+    $('feedback-status').replaceChildren();
+    $('feedback-dialog').showModal();
+  });
+  $('feedback-close').onclick = () => $('feedback-dialog').close();
+  $('feedback-cancel').onclick = () => $('feedback-dialog').close();
+  $('feedback-dialog').addEventListener('click', (event) => {
+    if (event.target === $('feedback-dialog')) $('feedback-dialog').close();
+  });
+  $('feedback-form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!form.reportValidity()) return;
+    try {
+      const issueUrl = buildFeedbackIssueUrl(Object.fromEntries(new FormData(form).entries()));
+      const message = document.createElement('span');
+      message.textContent = 'Your report is ready. Review it and submit on GitHub. Reports are public, and GitHub sign-in is required.';
+      const link = document.createElement('a');
+      link.href = issueUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.className = 'feedback-submit-link';
+      link.textContent = 'Open GitHub report';
+      $('feedback-status').replaceChildren(message, document.createElement('br'), link);
+    } catch (error) {
+      $('feedback-status').textContent = error.message;
+    }
+  });
+
   $('route-list').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-route-select]');
     if (btn) selectRoute(btn.dataset.routeSelect);
@@ -423,19 +482,39 @@ function bindEvents() {
       if (state.mapReady) fitToRoutes(state.map, state.data.geojson, [...state.visible]);
     }
   });
+  $('passenger-type').addEventListener('change', (e) => {
+    state.passengerType = e.target.value;
+    if (state.result?.status === PLAN_STATUS.SUCCESS) {
+      $('results').innerHTML = renderPlanResult(state.result, state.selectedItinerary, { passengerType: state.passengerType }) +
+        '<button type="button" class="btn btn-ghost" id="show-network-btn">Show the whole network</button>';
+    }
+    const result = state.draftResult;
+    if (result?.status === DRAFT_STATUS.SUCCESS) {
+      const selected = result.itineraries[state.draftIndex];
+      const visible = rankDraftChoices(result, result.candidates ?? result.itineraries, selected);
+      state.draftIndex = Math.max(0, visible.indexOf(selected));
+      $('results').innerHTML = renderDraftResult(result, state.draftIndex, { passengerType: state.passengerType }) +
+        '<button type="button" class="btn btn-ghost" id="show-network-btn">Show the whole network</button>';
+    }
+  });
 }
 
 // ---------- start ----------
 async function start() {
   const loaded = await loadData(import.meta.env.BASE_URL);
   if (!loaded.ok) {
-    $('data-banner').innerHTML = `<b>Route data problem.</b> ${escapeHtml(loaded.message)}` + loaded.errors.slice(0, 5).map((e) => `<br>• ${escapeHtml(e.message)}`).join('');
-    notify.alert(loaded.message);
+    if (import.meta.env.DEV) {
+      $('data-banner').innerHTML = `<b>Route data problem.</b> ${escapeHtml(loaded.message)}` + loaded.errors.slice(0, 5).map((e) => `<br>• ${escapeHtml(e.message)}`).join('');
+      notify.alert(loaded.message);
+    } else {
+      $('data-banner').textContent = 'Route information could not be loaded. Please refresh and try again.';
+      notify.alert('Route information could not be loaded. Please refresh and try again.');
+    }
     return;
   }
   try { state.storage = window.localStorage; } catch { state.storage = null; }
   const merged = mergeLocalDrafts(loaded.data, state.storage);
-  if (merged.error) notify.alert(`Your traced lines were not used: ${merged.error}`);
+  if (merged.error && import.meta.env.DEV) notify.alert(`Your traced lines were not used: ${merged.error}`);
   state.local = { used: merged.used, hasLocal: merged.hasLocal, ignored: merged.ignored, replaced: merged.replaced };
   state.data = merged.data;
   state.graph = buildGraph(state.data);
@@ -447,11 +526,11 @@ async function start() {
   const { map, error } = createMap($('map'), (msg) => notify.alert(msg), { offline });
   if (error) {
     $('map-fallback').hidden = false;
-    $('map-fallback').innerHTML = '<p><b>The interactive map could not start</b> (WebGL may be unavailable).<br>You can still browse routes, open the reference maps, and read trip results.</p>';
+    $('map-fallback').innerHTML = '<p><b>The map could not load.</b><br>You can still browse routes and plan a trip.</p>';
     return;
   }
   state.map = map;
-  if (offline) window.__sakay = state; // test hook (offline mode only)
+  if (import.meta.env.DEV && offline) window.__sakay = state; // development-only test hook
   map.on('click', handleMapClick);
   map.on('load', () => {
     addRouteLayers(map, state.data.geojson, state.data.routes);
@@ -459,7 +538,7 @@ async function start() {
     onRouteClick(map, (id) => { if (!state.pick) selectRoute(id); });
     state.mapReady = true;
     for (const terminal of state.data.stops.filter((stop) => stop.kind === 'terminal' && stop.verificationStatus === 'verified')) {
-      state.terminalMarkers.push(makeMarker(map, 'terminal', terminal.coordinates, `${terminal.name} · verified from user observation`));
+      state.terminalMarkers.push(makeMarker(map, 'terminal', terminal.coordinates, `${terminal.name} · based on observation`));
     }
     syncMap();
     fitToRoutes(map, state.data.geojson, null);

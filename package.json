@@ -11,9 +11,11 @@
     "dev": "vite",
     "dev:lan": "vite --host",
     "build": "vite build",
-    "preview": "vite preview",
+    "start": "node server.js",
+    "preview": "node server.js",
     "test": "node --test",
-    "validate:data": "node scripts/validate-data.js"
+    "validate:data": "node scripts/validate-data.js",
+    "audit:routes": "node scripts/audit-routes.js"
   },
   "dependencies": {
     "maplibre-gl": "^6.14.0"

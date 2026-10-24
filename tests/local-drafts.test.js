@@ -73,13 +73,13 @@ test('the ignore switch, corrupt storage and invalid saved data are handled', ()
   assert.deepEqual(mergeLocalDrafts(shipped, unknownRoute).used, []); // ghost route is not in the route list
 });
 
-test('results warn when a line was traced as two-way', () => {
+test('results note when the return direction may use different streets', () => {
   const legacy = buildDraftLines(shipped.geojson, routes);
   const r = planDraftTrip({ origin: [0.005, 0.0002], destination: [0.045, 0.0002], lines: legacy });
-  assert.match(renderDraftResult(r), /Check the way back/);
+  assert.match(renderDraftResult(r), /return direction may use different streets/);
   const oneWay = buildDraftLines({ features: [{ type: 'Feature', properties: { routeId: 'r1', direction: 'a', oneWay: true }, geometry: { type: 'LineString', coordinates: [[0, 0], [0.05, 0]] } }] }, routes);
   const r2 = planDraftTrip({ origin: [0.005, 0.0002], destination: [0.045, 0.0002], lines: oneWay });
-  assert.doesNotMatch(renderDraftResult(r2), /Check the way back/);
+  assert.doesNotMatch(renderDraftResult(r2), /return direction may use different streets/);
 });
 
 import { setReplaceShipped, REPLACE_KEY } from '../src/data/localDrafts.js';

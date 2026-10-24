@@ -67,13 +67,29 @@ test('too-short rides, invalid input and no lines are handled', () => {
   assert.equal(planDraftTrip({ origin: [0, 0], destination: [0.01, 0], lines: [] }).status, DRAFT_STATUS.NO_LINES);
 });
 
-test('draft results are always rendered with an unverified warning and route metadata', () => {
+test('public draft results explain community testing and keep important fare uncertainty', () => {
   const r = planDraftTrip({ origin: [0.005, 0.0005], destination: [0.045, 0.0005], lines });
   const html = renderDraftResult(r);
-  assert.match(html, /Terminal locations A\/B are verified/);
-  assert.match(html, /unverified/);
+  assert.match(html, /Community testing/);
+  assert.match(html, /based on observations/);
   assert.match(html, /Route H/);
-  assert.match(renderDraftResult({ status: 'draft_none', message: 'x', itineraries: [] }), /boarding and drop-off points along the route/);
+  assert.match(html, /Fare not confirmed/);
+  assert.doesNotMatch(html, /₱0\.00/);
+  assert.match(renderDraftResult({ status: 'draft_none', message: 'x', itineraries: [] }), /Community testing/);
+  assert.match(html, /data-report-routes="H"/);
+});
+
+test('fare-enabled route cards show a calculated passenger-specific range, never a zero fallback', () => {
+  const fareRoutes = routes.map((route) => ({ ...route, fareClass: 'traditional' }));
+  const fareLines = buildDraftLines(geo, fareRoutes);
+  const result = planAny({ origin: [0.005, 0.0005], destination: [0.045, 0.0005], lines: fareLines });
+  // Fare class is route metadata; supply the classified ride directly here to
+  // isolate the renderer from the planner's separate route-data tests.
+  result.itineraries[0].legs.forEach((leg) => { leg.fareClass = 'traditional'; });
+  const html = renderDraftResult(result, 0, { passengerType: 'student' });
+  assert.match(html, /Estimated total fare: <b>₱11\.25–₱12\.85<\/b>/);
+  assert.match(html, /Student discount/);
+  assert.doesNotMatch(html, /₱0\.00/);
 });
 
 test('each leg carries only the ridden segment, ordered from boarding to getting off', () => {
@@ -115,12 +131,11 @@ test('an out-and-back traced line uses the shorter pass, not a mixed one', () =>
   assert.ok(r.itineraries[0].approxRideMeters < 1000, `ride was ${r.itineraries[0].approxRideMeters} m`);
 });
 
-test('rendered draft cards show the fastest badge and a rough-time note', () => {
+test('rendered draft cards use plain public-facing estimated-time labels', () => {
   const r = planDraftTrip({ origin: [0.005, 0.0005], destination: [0.045, 0.0005], lines });
   const html = renderDraftResult(r);
   assert.match(html, /Fastest \(estimated\)/);
-  assert.match(html, /rough estimate/);
-  assert.match(html, /not schedules/);
+  assert.match(html, /min<\/b> estimated/);
 });
 
 // ---- direction / one-way rules ----

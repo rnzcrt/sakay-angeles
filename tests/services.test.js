@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { requestLocation, GEO_ERROR } from '../src/services/geolocation.js';
 import { searchPlaces, clearGeocodeCache, GEOCODE_ERROR, createNominatimProvider } from '../src/services/geocoding.js';
-import { routeWalking } from '../src/services/walking.js';
+import { routeWalking, resetWalkingThrottle } from '../src/services/walking.js';
 import { findNearbyPedestrianFacilities } from '../src/services/pedestrianFacilities.js';
+import { estimateItineraryFares, estimateJeepneyFare } from '../src/services/fares.js';
 
 const geo = (impl) => ({ getCurrentPosition: impl });
 
@@ -87,6 +88,7 @@ test('provider adapter builds a bounded-bias Philippine query without autocomple
 });
 
 test('pedestrian router returns network geometry and its measured distance', async () => {
+  resetWalkingThrottle();
   const result = await routeWalking([120.58, 15.15], [120.59, 15.16], {
     config: { baseUrl: 'https://walk.test/route/v1/driving', timeoutMs: 1000 },
     fetchImpl: async (url) => {
@@ -98,6 +100,24 @@ test('pedestrian router returns network geometry and its measured distance', asy
   assert.equal(result.durationSeconds, 900);
   assert.equal(result.coordinates.length, 3);
   assert.match(result.steps[0].instruction, /Sample Street/);
+});
+
+test('short pedestrian paths are accepted while failed or far-snapped paths return no geometry', async () => {
+  resetWalkingThrottle();
+  const start = [120.58, 15.15];
+  const end = [120.5801, 15.1506];
+  const options = { config: { baseUrl: 'https://walk.test/route/v1/driving', timeoutMs: 1000, minIntervalMs: 0, maxSnapDistanceMeters: 80 } };
+  const short = await routeWalking(start, end, { ...options, fetchImpl: async () => ({ ok: true, json: async () => ({ code: 'Ok', routes: [{ distance: 75, duration: 60, geometry: { coordinates: [start, [120.58005, 15.1503], end] }, legs: [] }] }) }) });
+  assert.equal(short.distanceMeters, 75);
+  assert.equal(short.coordinates.length, 3);
+  resetWalkingThrottle();
+  const diagnostics = [];
+  const failed = await routeWalking(start, end, { ...options, onDiagnostic: (event) => diagnostics.push(event), fetchImpl: async () => ({ ok: false, status: 429 }) });
+  assert.equal(failed, null);
+  assert.equal(diagnostics.at(-1).status, 'http_error');
+  resetWalkingThrottle();
+  const unsnappable = await routeWalking(start, end, { ...options, fetchImpl: async () => ({ ok: true, json: async () => ({ code: 'Ok', routes: [{ distance: 75, duration: 60, geometry: { coordinates: [[120.59, 15.15], [120.5901, 15.1506]] }, legs: [] }] }) }) });
+  assert.equal(unsnappable, null);
 });
 
 test('pedestrian facility lookup labels mapped bridges and excludes private crossings', async () => {
@@ -114,4 +134,46 @@ test('pedestrian facility lookup labels mapped bridges and excludes private cros
   assert.equal(facilities.length, 1);
   assert.equal(facilities[0].kind, 'Pedestrian footbridge');
   assert.equal(facilities[0].name, 'Sample Footbridge');
+});
+
+test('traditional jeepney fare uses the 4 km minimum and succeeding-km matrix', () => {
+  assert.equal(estimateJeepneyFare({ distanceMeters: 4000, distanceUncertaintyMeters: 0, fareClass: 'traditional' }).fare, 14);
+  assert.equal(estimateJeepneyFare({ distanceMeters: 5000, distanceUncertaintyMeters: 0, fareClass: 'traditional' }).fare, 16);
+  assert.equal(estimateJeepneyFare({ distanceMeters: 5001, distanceUncertaintyMeters: 0, fareClass: 'traditional' }).fare, 18);
+  assert.equal(estimateJeepneyFare({ distanceMeters: 5000, distanceUncertaintyMeters: 0, fareClass: 'modern' }).fare, 19.4);
+});
+
+test('traditional discounted matrix rates apply to student, senior and PWD fares', () => {
+  for (const passengerType of ['student', 'senior', 'pwd']) {
+    const fare = estimateJeepneyFare({ distanceMeters: 5000, distanceUncertaintyMeters: 0, fareClass: 'traditional', passengerType });
+    assert.equal(fare.fare, 12.85);
+    assert.deepEqual(fare.discountRange, { min: 3.15, max: 3.15 });
+  }
+});
+
+test('each jeepney ride is priced separately; walks cost nothing and unknown vehicle classes stay unavailable', () => {
+  const summary = estimateItineraryFares([
+    { type: 'ride', routeId: 'one', routeName: 'One', fareClass: 'traditional', rideMeters: 3000, fareDistanceUncertaintyMeters: 0 },
+    { type: 'transfer', walkMeters: 100 },
+    { type: 'ride', routeId: 'two', routeName: 'Two', fareClass: 'traditional', rideMeters: 3000, fareDistanceUncertaintyMeters: 0 },
+  ]);
+  assert.equal(summary.totalFare, 28);
+  assert.equal(summary.rides.length, 2);
+  assert.equal(estimateJeepneyFare({ distanceMeters: 3000, fareClass: null }).status, 'unavailable');
+});
+
+test('approximate distances produce dynamic fare ranges and incomplete rides never masquerade as a total', () => {
+  const ride = estimateJeepneyFare({ distanceMeters: 5000, fareClass: 'traditional' });
+  assert.equal(ride.status, 'range_estimate');
+  assert.deepEqual(ride.fareRange, { min: 16, max: 18 });
+  const student = estimateJeepneyFare({ distanceMeters: 5000, fareClass: 'traditional', passengerType: 'student' });
+  assert.deepEqual(student.fareRange, { min: 12.85, max: 14.45 });
+  const total = estimateItineraryFares([
+    { type: 'ride', routeName: 'known', fareClass: 'traditional', rideMeters: 5000 },
+    { type: 'ride', routeName: 'unknown', fareClass: null, rideMeters: 3000 },
+  ], 'student');
+  assert.equal(total.status, 'unavailable');
+  assert.equal(total.totalFare, null);
+  assert.deepEqual(total.partialKnownFareRange, { min: 12.85, max: 14.45 });
+  assert.equal(estimateItineraryFares([]).totalFare, null);
 });

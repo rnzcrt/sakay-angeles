@@ -10,8 +10,8 @@
 <body>
 <header class="topbar">
   <div class="brand"><div class="brand-mark" aria-hidden="true">✎</div>
-    <div>Route tracer<small>Draw draft route lines on real roads</small></div></div>
-  <div class="top-right"><a class="btn btn-ghost" href="./index.html" style="display:inline-grid;place-items:center">← Back to app</a></div>
+    <div>Route tracer<small>Private route management</small></div></div>
+  <div class="top-right"><a class="btn btn-ghost" href="/admin/routes" style="display:inline-grid;place-items:center">← Route management</a></div>
 </header>
 <div id="status-live" class="visually-hidden" role="status" aria-live="polite"></div>
 <div id="alert-banner" class="alert-banner" role="alert" hidden></div>
@@ -27,7 +27,7 @@
       <li><b>Route 2 — coming back:</b> press <b>Start Route 2 where Route 1 ends</b>, click along the road back (it may be a different road), then press <b>Finish Route 2 at the start of Route 1</b>.</li>
       <li>With <b>Snap to roads</b> on, the path follows the streets (including one-way rules) between your clicks. If it takes a long detour, it is replaced by a straight line and you are told. <b>Hold Option/Alt while clicking</b> to add a straight (unsnapped) piece, or turn snapping off and click at every corner.</li>
       <li>Drag a point to move it; double-click a point to delete it. <b>Click a point to select it, then “Cut after the selected point”</b> to throw away everything after it and keep tracing from there.</li>
-      <li>Press <b>Export</b>, then replace <code>public/data/routes.geojson</code>.</li>
+      <li>Preview the traced lines on the map, then use <b>Save route geometry</b> to publish the corrected geometry with a change record.</li>
     </ol>
     <label class="draft-toggle"><input type="checkbox" id="snap-toggle" checked> Snap to roads <small>(uses the public OSRM demo server; follows one-way streets; falls back to a straight line if unavailable)</small></label>
 
@@ -75,7 +75,16 @@
       </div>
     </div>
 
-    <div class="section-head"><h2 class="section-title">Save your work</h2></div>
+    <div class="section-head"><h2 class="section-title">Save route geometry</h2></div>
+    <fieldset class="trace-audit"><legend>Change record (required)</legend>
+      <label class="field-label" for="audit-change">What changed?</label><input id="audit-change" maxlength="1000" required />
+      <label class="field-label" for="audit-reason">Reason</label><textarea id="audit-reason" rows="2" maxlength="2000" required></textarea>
+      <label class="field-label" for="audit-source">Information source</label><input id="audit-source" maxlength="1000" required />
+      <label class="field-label" for="audit-observation">Observation or supporting feedback</label><textarea id="audit-observation" rows="2" maxlength="3000" required></textarea>
+    </fieldset>
+    <p class="hint">The dashed lines on the map are your live preview. Preview them before publishing; published edits create a revision and remain labeled unverified.</p>
+    <div class="actions"><button type="button" class="btn btn-ghost" id="preview-route">Preview selected route</button><button type="button" class="btn btn-primary" id="save-geometry">Publish route geometry</button></div>
+    <div class="section-head"><h2 class="section-title">Import and export</h2></div>
     <div class="actions"><button type="button" class="btn btn-ghost" id="start-over-btn">Start over (clear every traced line)</button></div>
     <div class="actions">
       <button type="button" class="btn btn-primary" id="export-btn">Export GeoJSON</button>
@@ -83,7 +92,7 @@
     </div>
     <label class="field-label" for="import-file" style="margin-top:12px">Import a GeoJSON file</label>
     <input id="import-file" type="file" accept=".geojson,.json,application/geo+json,application/json" />
-    <p class="hint">Your drafts are also kept in this browser automatically (localStorage). Export regularly — clearing browser data deletes them.</p>
+    <p class="hint">A local browser draft is kept while tracing. The saved route data and revision history are stored by the admin server.</p>
 
     <section aria-labelledby="ref-title">
       <h2 id="ref-title" class="section-title" style="margin-top:20px">Reference maps</h2>

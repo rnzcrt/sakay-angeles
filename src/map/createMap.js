@@ -1,7 +1,9 @@
 import * as maplibregl from 'maplibre-gl';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MAP_CONFIG } from '../config.js';
 
+maplibregl.setWorkerUrl(workerUrl);
 /**
  * Creates the map. Returns { map } or { error } (e.g. WebGL unavailable).
  * `onProblem(message)` is called when the style/tiles fail to load.

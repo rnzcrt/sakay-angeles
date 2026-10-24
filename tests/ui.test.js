@@ -20,7 +20,7 @@ test('9. route item renders name and color from supplied metadata', () => {
 test('9. route item shows text, not just color, and disables toggle without geometry', () => {
   const html = renderRouteItem(real[2], { hasGeometry: false });
   assert.match(html, /White jeepney/);
-  assert.match(html, /No digitized line yet/);
+  assert.match(html, /Needs a route line/);
   assert.match(html, /disabled/);
 });
 
@@ -49,18 +49,19 @@ test('9. UI and routing source files contain no hard-coded route names or colors
 
 test('non-success outcomes render honest states and never a route', () => {
   const none = renderPlanResult({ status: PLAN_STATUS.NO_VERIFIED_ROUTE, message: "We don't have enough verified route data to recommend a reliable trip yet.", itineraries: [], details: { verifiedDirectionCount: 0, excludedDirectionCount: 11 } });
-  assert.match(none, /No verified route yet/);
-  assert.match(none, /enough verified route data/);
+  assert.match(none, /We're still adding route details/);
+  assert.doesNotMatch(none, /verified direction records/);
   assert.ok(!/Board/.test(none));
-  assert.match(renderPlanResult({ status: PLAN_STATUS.ORIGIN_TOO_FAR, message: 'x', details: { nearestStop: { name: 'S', distanceMeters: 900 } } }), /starting point is too far/);
-  assert.match(renderPlanResult({ status: PLAN_STATUS.DATA_ERROR, message: 'bad', details: { errors: [{ message: 'oops' }] } }), /oops/);
+  assert.match(renderPlanResult({ status: PLAN_STATUS.ORIGIN_TOO_FAR, message: 'x', details: { nearestStop: { name: 'S', distanceMeters: 900 } } }), /Try a closer starting point/);
+  assert.match(renderPlanResult({ status: PLAN_STATUS.DATA_ERROR, message: 'bad', details: { errors: [{ message: 'oops' }] } }), /We couldn't find a route/);
 });
 
-test('route detail flags source ambiguities and unverified status', () => {
+test('public route detail shows community testing and a route-specific feedback action', () => {
   const html = renderRouteDetail(real.find((r) => r.id === 'checkpoint-hensonville-holy'), { hasGeometry: false });
-  assert.match(html, /To verify/);
-  assert.match(html, /Holy Rosary Church/);
-  assert.match(html, /Unverified/);
+  assert.match(html, /Needs confirmation/);
+  assert.match(html, /Fare not confirmed/);
+  assert.match(html, /data-report-routes="checkpoint-hensonville-holy"/);
+  assert.doesNotMatch(html, /Unverified secondary source/);
 });
 
 test('geocode choices flag results outside the service area', () => {
@@ -74,9 +75,9 @@ test('routeHasGeometry matches on routeId', () => {
   assert.equal(routeHasGeometry({ id: 'b' }, g), false);
 });
 
-test('route detail shows secondary-source notes labelled as unverified', () => {
+test('public route detail does not expose internal source conflict notes', () => {
   const r = real.find((x) => x.id === 'sapang-bato-angeles');
   const html = renderRouteDetail(r, { hasGeometry: false });
-  assert.match(html, /Unverified secondary source/);
-  assert.match(html, /Not used for trip suggestions/);
+  assert.match(html, /Report a route issue/);
+  assert.doesNotMatch(html, /The Pooch of the Philippines/);
 });

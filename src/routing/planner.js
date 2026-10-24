@@ -231,6 +231,7 @@ function assembleItinerary(raw, graph) {
       routeName: route.name,
       jeepneyColorName: route.jeepneyColorName,
       displayColor: route.displayColor,
+      fareClass: route.fareClass ?? null,
       directionId: dir.id,
       directionLabel: dir.label,
       geometryId: dir.geometryId,

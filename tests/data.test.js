@@ -14,6 +14,30 @@ test('shipped data validates', () => {
   assert.deepEqual(r.errors, []);
 });
 
+test('updated traces keep all route directions and their verified terminal links without verifying geometry', () => {
+  assert.equal(dataset.geojson.features.length, 22);
+  const routes = new Map(dataset.routes.map((route) => [route.id, route]));
+  const stops = new Map(dataset.stops.map((stop) => [stop.id, stop]));
+  const directionIds = dataset.geojson.features.map((feature) => feature.properties.directionId);
+  assert.equal(new Set(directionIds).size, directionIds.length);
+  assert.deepEqual(new Set(dataset.geojson.features.map((feature) => feature.properties.routeId)), new Set(routes.keys()));
+  for (const feature of dataset.geojson.features) {
+    const p = feature.properties;
+    const route = routes.get(p.routeId);
+    const start = stops.get(p.startStopId);
+    const end = stops.get(p.endStopId);
+    assert.ok(route, p.routeId);
+    assert.ok(start && end, p.directionId);
+    assert.equal(start.verificationStatus, 'verified');
+    assert.equal(end.verificationStatus, 'verified');
+    assert.equal(start.routeId, p.routeId);
+    assert.equal(end.routeId, p.routeId);
+    assert.equal(p.draft, true);
+    assert.equal(route.geometryStatus, 'unverified');
+    assert.ok(['LineString', 'MultiLineString'].includes(feature.geometry.type));
+  }
+});
+
 test('all 11 legend routes exist with source labels and color names', () => {
   assert.equal(routesFile.routes.length, 11);
   const colors = routesFile.routes.map((r) => r.jeepneyColorName).sort();

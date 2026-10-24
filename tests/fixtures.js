@@ -3,10 +3,12 @@
 
 export const stop = (id, lng, lat = 0, verificationStatus = 'verified') => ({
   id, name: `Stop ${id}`, coordinates: [lng, lat], verificationStatus,
+  ...(verificationStatus === 'verified' ? { source: 'synthetic fixture' } : {}),
 });
 
 export const direction = (id, orderedStopIds, verificationStatus = 'verified') => ({
   id, label: `Dir ${id}`, orderedStopIds, geometryId: `geo-${id}`, verificationStatus,
+  ...(verificationStatus === 'verified' ? { evidence: { source: 'synthetic fixture', method: 'automated test fixture', checkedAt: '2026-01-01' } } : {}),
 });
 
 export const route = (id, directions, extra = {}) => ({
@@ -16,6 +18,7 @@ export const route = (id, directions, extra = {}) => ({
   jeepneyColorName: `Color-${id}`,
   displayColor: '#123456',
   geometryStatus: 'verified',
+  geometryEvidence: { source: 'synthetic fixture', method: 'automated test fixture', checkedAt: '2026-01-01' },
   directions,
   ...extra,
 });

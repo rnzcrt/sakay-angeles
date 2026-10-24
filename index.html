@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="description" content="Prototype jeepney route explorer for Angeles City, Pampanga. Route data is not yet verified." />
+<meta name="description" content="Explore jeepney routes in Angeles City and help improve community route information." />
 <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-<title>Sakay Angeles — Jeepney Route Finder (prototype)</title>
+<title>Sakay Angeles — Community Jeepney Guide</title>
 <script type="module" src="/src/main.js"></script>
 </head>
 <body>
@@ -13,7 +13,7 @@
 <header class="topbar">
   <div class="brand"><div class="brand-mark" aria-hidden="true">↗</div>
     <div>Sakay Angeles<small>Jeepney route explorer · Angeles City, Pampanga</small></div></div>
-  <div class="top-right"><span class="pill pill-warn">Prototype · route data unverified</span></div>
+  <div class="top-right"><span class="pill pill-warn">Community testing</span></div>
 </header>
 
 <div id="status-live" class="visually-hidden" role="status" aria-live="polite"></div>
@@ -23,7 +23,7 @@
   <aside class="sidebar" id="sidebar">
     <p class="eyebrow">Explore first, then plan</p>
     <h1>Where are you headed?</h1>
-    <div id="data-banner" class="notice" role="status">Loading route data…</div>
+    <div id="data-banner" class="notice" role="status">Help improve Sakay Angeles! Routes and fares may need corrections. Send feedback based on your real trip so we can improve this guide.</div>
 
     <section id="planner" class="search-card" aria-labelledby="planner-title">
       <h2 id="planner-title" class="section-title">Plan a trip</h2>
@@ -62,11 +62,20 @@
         </div>
         <div id="destination-choices" class="choices-box"></div>
       </form>
+      <div class="field">
+        <label class="field-label" for="passenger-type">Passenger type</label>
+        <select id="passenger-type">
+          <option value="regular">Regular passenger</option>
+          <option value="student">Student</option>
+          <option value="senior">Senior citizen</option>
+          <option value="pwd">Person with disability (PWD)</option>
+        </select>
+      </div>
       <div class="actions">
         <button type="button" class="btn btn-primary" id="find-btn">Find jeepney route</button>
         <button type="button" class="btn btn-ghost" id="clear-trip-btn">Clear trip</button>
       </div>
-      <p class="hint">Location is requested only when you press “Use my location” and stays in your browser. Search is sent to OpenStreetMap’s Nominatim service only when you press Search.</p>
+      <p class="hint">Your location is used only when you choose it. Place searches are sent when you press Search.</p>
     </section>
 
     <div id="results" aria-live="polite"></div>
@@ -82,16 +91,9 @@
       <div id="route-detail"></div>
     </section>
 
-    <section aria-labelledby="ref-title">
-      <h2 id="ref-title" class="section-title">Reference maps</h2>
-      <p class="muted">The original source maps are the only complete picture of the routes today. Open one to explore.</p>
-      <ul class="ref-list" id="ref-list"></ul>
-    </section>
-
     <footer class="notice notice-soft">
-      <p id="source-note"></p>
+      <p>Help improve this community route guide. Route and fare details can change; check with the driver when boarding.</p>
       <p id="attribution-note"></p>
-      <p><a href="./trace.html">Contributors: open the route tracing tool</a></p>
     </footer>
   </aside>
 
@@ -104,5 +106,30 @@
     <div id="map-fallback" class="map-fallback" hidden></div>
   </section>
 </main>
+<dialog id="feedback-dialog" class="feedback-dialog" aria-labelledby="feedback-title">
+  <form id="feedback-form" class="feedback-form">
+    <div class="section-head"><h2 id="feedback-title">Help improve this route</h2><button type="button" class="btn btn-ghost" id="feedback-close" aria-label="Close feedback form">Close</button></div>
+    <p class="muted">Share what happened on your trip. Reports open as a GitHub issue for the maintainer to review; you’ll need to sign in to submit it. Don’t include private or identifying information.</p>
+    <label class="field-label" for="feedback-issue">What should we check?</label>
+    <select id="feedback-issue" name="issueType" required>
+      <option value="">Choose an issue</option>
+      <option>Incorrect jeepney route</option><option>Wrong route direction</option>
+      <option>Incorrect boarding or drop-off point</option><option>Missing stop</option>
+      <option>Incorrect fare</option><option>Incorrect jeepney color or name</option>
+      <option>Missing or incorrect transfer</option><option>Walking route is too long</option>
+      <option>Unsafe pedestrian crossing</option><option>Better or more direct route available</option><option>Other</option>
+    </select>
+    <label class="field-label" for="feedback-route">Route or jeepney color</label><input id="feedback-route" name="route" maxlength="160">
+    <div class="feedback-context"><label class="field-label" for="feedback-origin">Starting point</label><input id="feedback-origin" name="origin" maxlength="180"><label class="field-label" for="feedback-destination">Destination</label><input id="feedback-destination" name="destination" maxlength="180"></div>
+    <label class="field-label" for="feedback-location">Where did it happen? (optional)</label><input id="feedback-location" name="location" maxlength="240" placeholder="Street, stop, or nearby landmark">
+    <label class="field-label" for="feedback-incorrect">What seems incorrect?</label><textarea id="feedback-incorrect" name="incorrect" required maxlength="2000" rows="3"></textarea>
+    <label class="field-label" for="feedback-correction">What do you think is correct? (optional)</label><textarea id="feedback-correction" name="correction" maxlength="2000" rows="3"></textarea>
+    <label class="field-label" for="feedback-experience">Your trip experience (optional)</label><textarea id="feedback-experience" name="experience" maxlength="2000" rows="3" placeholder="What did you observe? You do not need proof to report an issue."></textarea>
+    <div class="field-row"><div><label class="field-label" for="feedback-date">Date of trip (optional)</label><input id="feedback-date" name="travelDate" type="date"></div><div><label class="field-label" for="feedback-source">Public source link (optional)</label><input id="feedback-source" name="sourceUrl" type="url" maxlength="500" placeholder="https://…"></div></div>
+    <label class="visually-hidden" for="feedback-website">Leave this field empty</label><input id="feedback-website" name="website" class="feedback-honeypot" tabindex="-1" autocomplete="off">
+    <p id="feedback-status" class="muted" role="status" aria-live="polite"></p>
+    <div class="actions"><button class="btn btn-primary" type="submit">Continue to GitHub</button><button class="btn btn-ghost" type="button" id="feedback-cancel">Cancel</button></div>
+  </form>
+</dialog>
 </body>
 </html>

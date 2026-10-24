@@ -387,6 +387,37 @@ function bind() {
     try { await navigator.clipboard.writeText(text); notify.status('GeoJSON copied to clipboard.'); }
     catch { notify.alert('Could not copy automatically. Use Export instead.'); }
   };
+  $('save-geometry').onclick = async () => {
+    const audit = Object.fromEntries(['change', 'reason', 'source', 'observation'].map((key) => [key, $(`audit-${key}`).value.trim()]));
+    if (Object.values(audit).some((v) => !v)) { notify.alert('Complete the change, reason, information source, and observation fields before saving.'); return; }
+    const geojson = exportGeoJson(); if (!geojson) return;
+    const current = await fetch('/api/admin/dataset').then((r) => r.json());
+    const nextGeo = JSON.parse(geojson);
+    const routeIds = new Set([...current.geojson.features, ...nextGeo.features].map((f) => f.properties?.routeId).filter(Boolean));
+    const changed = [...routeIds].filter((id) => {
+      const a = current.geojson.features.filter((f) => f.properties?.routeId === id).map((f) => ({ direction: f.properties?.direction, oneWay: f.properties?.oneWay, geometry: f.geometry }));
+      const b = nextGeo.features.filter((f) => f.properties?.routeId === id).map((f) => ({ direction: f.properties?.direction, oneWay: f.properties?.oneWay, geometry: f.geometry }));
+      return JSON.stringify(a) !== JSON.stringify(b);
+    });
+    if (!changed.length) { notify.status('No route geometry changes to save.'); return; }
+    nextGeo.features = nextGeo.features.map((feature) => {
+      const old = current.geojson.features.find((f) => f.properties?.routeId === feature.properties?.routeId && (f.properties?.direction || 'a') === (feature.properties?.direction || 'a'));
+      return old ? { ...feature, properties: { ...old.properties, ...feature.properties } } : feature;
+    });
+    const response = await fetch('/api/admin/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: { ...current, geojson: nextGeo }, editedRouteIds: changed, audit: { ...audit, date: new Date().toISOString().slice(0, 10) } }) });
+    const result = await response.json();
+    if (!response.ok) { notify.alert(result.details?.[0]?.message || result.error || 'Route geometry could not be saved.'); return; }
+    notify.status(`Saved ${changed.length} changed route${changed.length === 1 ? '' : 's'} as revision ${result.revision}. Route status remains unverified.`);
+    const saved = await loadData(import.meta.env.BASE_URL);
+    if (saved.ok) { state.routes = saved.data.routes; state.lines = geojsonToLines(saved.data.geojson); saveLocal(); renderList(); renderActive(); syncMap(); }
+  };
+  $('preview-route').onclick = () => {
+    const route = activeRoute(); const lines = route && routeLines(route.id).flatMap(pathOf);
+    if (!lines?.length) { notify.alert('Choose a route and trace at least one direction before previewing.'); return; }
+    const bounds = new maplibregl.LngLatBounds(lines[0], lines[0]); lines.forEach((point) => bounds.extend(point));
+    state.map.fitBounds(bounds, { padding: 70, maxZoom: 16, duration: 500 });
+    notify.status(`Previewing ${route.name} on the map. Review the dashed route before publishing.`);
+  };
   $('import-file').addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -423,7 +454,9 @@ async function start() {
   const loaded = await loadData(import.meta.env.BASE_URL);
   if (!loaded.ok) { notify.alert(loaded.message); return; }
   state.routes = loaded.data.routes;
-  state.lines = loadLocal() ?? geojsonToLines(loaded.data.geojson);
+  // The server is the canonical source in the private editor. Browser drafts
+  // cannot silently override the current shared route dataset.
+  state.lines = geojsonToLines(loaded.data.geojson);
   bind(); renderList(); renderActive();
   $('trace-legend').innerHTML = '<strong>Tracing tips</strong><div class="legend-row">Click = add point</div><div class="legend-row">Drag = move point</div><div class="legend-row">Double-click point = delete</div><div class="legend-row">Option/Alt + click = straight piece</div><div class="legend-row">S = start, E = end</div>';
 
@@ -432,6 +465,8 @@ async function start() {
   if (error) { notify.alert('The interactive map could not start (WebGL may be unavailable).'); return; }
   state.map = map;
   if (offline) window.__trace = state; // test hook (offline mode only)
+  const routeParam = new URLSearchParams(location.search).get('route');
+  if (routeParam && state.routes.some((r) => r.id === routeParam)) selectRoute(routeParam);
   map.on('click', (e) => { const straight = Boolean(e.originalEvent?.altKey); enqueue(() => addPoint(e.lngLat, straight ? { snap: false } : {})); });
   map.on('load', () => {
     const layout = { 'line-cap': 'round', 'line-join': 'round' };

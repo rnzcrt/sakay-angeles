@@ -73,6 +73,28 @@ test('a verified direction may not use unverified stops or lack geometry', () =>
   assert.ok(codes(validateDataset(e)).includes('incomplete_verified'));
 });
 
+test('verified route geometry, directions, stops, and fare classes need traceable evidence', () => {
+  const geometry = makeData();
+  delete geometry.routes[0].geometryEvidence;
+  assert.ok(codes(validateDataset(geometry)).includes('missing_verification_evidence'));
+
+  const direction = makeData();
+  delete direction.routes[0].directions[0].evidence;
+  assert.ok(codes(validateDataset(direction)).includes('missing_verification_evidence'));
+
+  const fare = makeData();
+  fare.routes[0].fareClass = 'traditional';
+  assert.ok(codes(validateDataset(fare)).includes('missing_verification_evidence'));
+  fare.routes[0].fareClassEvidence = { source: 'PTRO', method: 'operator confirmation', checkedAt: '2026-10-20' };
+  assert.equal(validateDataset(fare).valid, true);
+  fare.routes[0].fareClassEvidence.checkedAt = '2026-99-99';
+  assert.ok(codes(validateDataset(fare)).includes('missing_verification_evidence'));
+
+  const stopSource = makeData();
+  delete stopSource.stops[0].source;
+  assert.ok(codes(validateDataset(stopSource)).includes('missing_verification_evidence'));
+});
+
 test('invalid verification statuses and transfers are caught', () => {
   const d = makeData();
   d.stops[0].verificationStatus = 'sure';

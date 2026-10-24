@@ -20,12 +20,26 @@ npm run dev        # http://localhost:5173
 npm test           # planner, validation, UI renderers, services
 npm run validate:data
 npm run build      # outputs dist/
-npm run preview
+npm start          # authenticated production server at http://localhost:4173
 ```
 `npm run dev:lan` exposes the dev server to your network (e.g. to test on a phone). Geolocation needs HTTPS or `localhost`.
 
 ## Route tracing tool
-Open `/trace.html` (also linked from the app footer). **Each jeepney route has two parts: Route 1 and Route 2.**
+Route management is served by the Node server at `/admin/routes`. The route tracer is available at `/trace.html` after GitHub sign-in. **Never deploy `dist/` as a static site:** authentication, protected writes, route persistence, and history are enforced by `server.js`.
+
+Configure a GitHub OAuth App with callback URL `<BASE_URL>/auth/callback`, then set these environment variables on the server:
+
+```text
+BASE_URL="http://localhost:3000"
+GITHUB_CLIENT_ID="Ov23limVoK3tkPcxVYFY"
+GITHUB_CLIENT_SECRET="df3616841ce462c7d054e60ebfe4ed6a1fa33111"
+SESSION_SECRET="fab3b91f4c29677ceb4c6aafcbeebfc09173aa2132c36f499888d4057a1ce3b6e1b904313e7729d4573560cb8580938c"
+ADMIN_GITHUB_USERS="rnzcrt"
+```
+
+The allowlist is checked on every OAuth login; credentials and OAuth tokens stay on the server. Admin sessions use HttpOnly, SameSite cookies and expire after 12 hours. If OAuth is not configured, admin access remains disabled. Run this app on a Node host with a persistent writable disk; optional `ROUTE_DATA_DIR` and `ROUTE_HISTORY_DIR` can point to persistent storage. Back up both directories.
+
+**Each jeepney route has two parts: Route 1 and Route 2.**
 1. Pick a route.
 2. **Route 1 — going.** Your first click is the first terminal (the START). Click along the road to the end. Your last click is the new terminal.
 3. **Route 2 — coming back.** Press **Start Route 2 where Route 1 ends**, click along the road back (it can be a different road), then press **Finish Route 2 at the start of Route 1**. If the way back is the same road, **Copy Route 1 backwards** does it in one click.
@@ -33,8 +47,8 @@ Open `/trace.html` (also linked from the app footer). **Each jeepney route has t
 - Traced one long line by mistake? Click the turnaround point and press **Split here**: Route 1 ends there and the rest becomes Route 2.
 - **Snap to roads** (on by default) routes between your clicks with the public OSRM demo server, which follows one-way streets from OpenStreetMap. It is for light use only; if it is unreachable the tracer falls back to a straight line and tells you. Change the provider in `ROUTING_CONFIG` (`src/config.js`). Clicks made while snapping is still working are queued, never dropped. **Detour guard:** if snapping would take a long way round (for example one-way or unconnected streets) the piece is drawn straight instead and you are told; **hold Option/Alt while clicking** to add a straight piece on purpose; an existing line with detours shows a warning and a **Straighten the detours** button.
 - Drag a point to move it, double-click to delete. **Click a point to select it, then *Cut after the selected point*** to throw away everything after it and keep tracing from there.
-- *Start over* clears every traced line; from then on the main app shows only the routes you have traced. Terminal names are optional.
-- Export GeoJSON and replace `public/data/routes.geojson`. Drafts autosave in your browser, and the main app automatically uses the lines you traced in the same browser (with a notice and a *Use the shipped file instead* switch).
+- Terminal names are optional. Route metadata and stops can be managed from the private dashboard.
+- Review the dashed geometry in the tracer preview, complete the required change record, then publish. The server validates and saves the route files and a full pre-change snapshot. The public guide reads the saved files. Editing geometry or directions keeps them unverified; feedback never changes routes by itself.
 In the app, each part is ridden only in its traced order. When Route 1 and Route 2 join up (Route 1 ends where Route 2 starts and Route 2 ends where Route 1 starts) they are treated as one jeepney going round, so you can stay on board across the turnaround. Add `?offline` to either page for a blank basemap (testing).
 
 ## Switching the trip
@@ -55,6 +69,8 @@ Results are labelled *draft*. Terminal locations are shown as verified; boarding
 index.html                Vite entry
 public/data/              routes.json · stops.json · routes.geojson (static data)
 src/main.js               app wiring
+server.js                 GitHub OAuth, admin authorization, route API and revision storage
+admin.html · src/admin.js private route dashboard, stops, feedback and history
 src/config.js             map style, service area, planner and geocoder settings
 src/data/                 validate.js (schema checks) · loadData.js
 src/routing/              planner.js (verified graph planner) · draftPlanner.js (opt-in rough matcher) · geo.js
@@ -66,7 +82,7 @@ src/ui/                   routeList.js · tripResults.js · notifications.js · 
 tests/                    node:test suites (+ synthetic fixtures)
 assets/reference-maps/    the three supplied source images
 docs/                     ROUTE_DATA_GUIDE.md · TEST_PLAN.md
-.github/workflows/        GitHub Pages deployment
+.github/workflows/        CI validation and build (no static deployment)
 CLAUDE_PROMPT.md          the engineering brief this refactor followed
 ```
 
@@ -86,15 +102,10 @@ Source labels are preserved as printed (e.g. “SAPANG BATO - ANGLES”, “PAND
 Distances are straight-line estimates. No travel times are produced.
 
 ## Privacy
-Location is requested only after you press *Use my location*, is used in your browser, and is never sent to our code's servers (there are none). Place searches you submit are sent to Nominatim (OpenStreetMap). Map tiles are fetched from OpenFreeMap.
+Location is requested only after you press *Use my location* and is used in your browser. Place searches you submit are sent to Nominatim (OpenStreetMap); map tiles are fetched from OpenFreeMap. Route data is served by this project's Node server. GitHub OAuth tokens are kept in server memory and are used only for administrator access and report moderation.
 
-## Deploy to GitHub Pages
-`vite.config.js` uses `base: './'`, so the build works under a repository sub-path.
-1. Push to GitHub (branch `main`).
-2. Repo → Settings → Pages → Source: **GitHub Actions**.
-3. The included workflow (`.github/workflows/deploy.yml`) runs tests, builds and deploys `dist/`.
-
-If you prefer an absolute base, set `base: '/<repo-name>/'` in `vite.config.js`.
+## Deployment
+Deploy the repository to a Node.js host that supports environment secrets and a persistent writable disk, then run `npm ci`, `npm run build`, and `npm start`. Static hosting such as GitHub Pages cannot enforce the administrator boundary or persist route edits, so the GitHub workflow only validates and builds. Set `BASE_URL` to the public HTTPS origin and configure the OAuth variables above before enabling route management.
 
 ## Troubleshooting
 - **Blank/grey map:** check the console and network tab for `tiles.openfreemap.org`; WebGL must be enabled. The page shows a banner or fallback and stays usable.

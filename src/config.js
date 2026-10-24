@@ -81,9 +81,42 @@ export const ROUTING_CONFIG = {
 // Public OSRM pedestrian router for itinerary walking legs. It is a light-use
 // demo service, so production deployments should self-host or use a contracted provider.
 export const WALKING_ROUTING_CONFIG = {
+  // This endpoint is the foot-profile OSRM-compatible service (the final
+  // `driving` token is the API profile placeholder used by this instance).
   baseUrl: 'https://routing.openstreetmap.de/routed-foot/route/v1/driving',
   timeoutMs: 10000,
+  minIntervalMs: 1100,
+  maxSnapDistanceMeters: 250,
   attribution: 'Walking routes: OSRM · © OpenStreetMap contributors',
+};
+
+// Fare guide effective 2026-09-28. The route data does not currently identify
+// traditional vs modern jeepneys; no class is assumed when route.fareClass is
+// absent. In succeeding-kilometre matrices, any started kilometre is charged.
+export const JEEPNEY_FARE_RULES = {
+  effectiveDate: '2026-09-28',
+  sourceUrl: 'https://ptvnews.ph/ltfrb-releases-new-matrices-for-puv-fare-hikes-effective-sept-28/',
+  succeedingKmRounding: 'ceil',
+  fareIncrementPesos: 0.01,
+  approximateDistanceUncertaintyRatio: 0.1,
+  categories: {
+    regular: { label: 'Regular passenger' },
+    student: { label: 'Student' },
+    senior: { label: 'Senior citizen' },
+    pwd: { label: 'Person with disability (PWD)' },
+  },
+  vehicleClasses: {
+    traditional: {
+      label: 'Traditional jeepney',
+      regular: { minimumFare: 14, minimumKm: 4, succeedingFarePerKm: 2 },
+      discounted: { minimumFare: 11.25, minimumKm: 4, succeedingFarePerKm: 1.6 },
+    },
+    modern: {
+      label: 'Modern jeepney',
+      regular: { minimumFare: 17, minimumKm: 4, succeedingFarePerKm: 2.4 },
+      discounted: { minimumFare: 13.5, minimumKm: 4, succeedingFarePerKm: 1.92 },
+    },
+  },
 };
 
 // Nearby crossings and grade-separated pedestrian routes from OpenStreetMap.

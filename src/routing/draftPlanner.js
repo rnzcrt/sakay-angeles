@@ -187,6 +187,7 @@ const makeLeg = (entry, from, to) => ({
   routeName: entry.route.name,
   jeepneyColorName: entry.route.jeepneyColorName,
   displayColor: entry.route.displayColor,
+  fareClass: entry.route.fareClass ?? null,
   directionLabel: entry.directionLabel,
   oneWay: entry.oneWay,
   isLoop: entry.isLoop,

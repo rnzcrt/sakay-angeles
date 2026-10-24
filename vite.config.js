@@ -9,6 +9,8 @@ export default defineConfig({
   optimizeDeps: { exclude: ['maplibre-gl'] },
   build: {
     chunkSizeWarningLimit: 1200,
-    rollupOptions: { input: { main: 'index.html', trace: 'trace.html' } },
+    // Admin pages are gated by server.js in production. Static hosting is not a
+    // supported deployment because it cannot enforce the admin access checks.
+    rollupOptions: { input: { main: 'index.html', admin: 'admin.html', trace: 'trace.html' } },
   },
 });

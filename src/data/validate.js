@@ -19,6 +19,17 @@ function err(code, message, path) {
   return { code, message, path };
 }
 
+function validateEvidence(evidence, path, errors) {
+  const parsedDate = typeof evidence?.checkedAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(evidence.checkedAt)
+    ? new Date(`${evidence.checkedAt}T00:00:00Z`)
+    : null;
+  const dateIsValid = parsedDate && !Number.isNaN(parsedDate.getTime()) && parsedDate.toISOString().slice(0, 10) === evidence.checkedAt;
+  if (!isObject(evidence) || !isNonEmptyString(evidence.source) || !isNonEmptyString(evidence.method) ||
+      !dateIsValid) {
+    errors.push(err('missing_verification_evidence', 'Verified data needs evidence with source, method, and checkedAt (YYYY-MM-DD).', path));
+  }
+}
+
 function validatePositions(positions, path, errors, minLength = 2) {
   if (!Array.isArray(positions) || positions.length < minLength) {
     errors.push(err('malformed_geometry', `Expected at least ${minLength} positions.`, path));
@@ -100,6 +111,9 @@ export function validateDataset(dataset) {
     if (!VERIFICATION_STATUSES.includes(s.verificationStatus)) {
       errors.push(err('invalid_status', `Stop "${s.id}" has invalid verificationStatus.`, `${path}.verificationStatus`));
     }
+    if (s.verificationStatus === 'verified' && !isNonEmptyString(s.source)) {
+      errors.push(err('missing_verification_evidence', `Verified stop "${s.id}" needs a source.`, `${path}.source`));
+    }
   });
 
   // --- geometry ---
@@ -141,6 +155,15 @@ export function validateDataset(dataset) {
     if (!VERIFICATION_STATUSES.includes(r.geometryStatus)) {
       errors.push(err('invalid_status', `Route "${r.id}" has invalid geometryStatus.`, `${path}.geometryStatus`));
     }
+    if (r.fareClass !== undefined && r.fareClass !== null && !['traditional', 'modern'].includes(r.fareClass)) {
+      errors.push(err('invalid_fare_class', `Route "${r.id}" fareClass must be traditional, modern, or null when unknown.`, `${path}.fareClass`));
+    }
+    if (r.fareClass !== undefined && r.fareClass !== null) {
+      validateEvidence(r.fareClassEvidence, `${path}.fareClassEvidence`, errors);
+    }
+    if (r.geometryStatus === 'verified') {
+      validateEvidence(r.geometryEvidence, `${path}.geometryEvidence`, errors);
+    }
     if (r.directions !== undefined && !Array.isArray(r.directions)) {
       errors.push(err('malformed_route', `Route "${r.id}" directions must be an array.`, `${path}.directions`));
       return;
@@ -156,6 +179,7 @@ export function validateDataset(dataset) {
       if (!VERIFICATION_STATUSES.includes(d.verificationStatus)) {
         errors.push(err('invalid_status', `Direction "${d.id}" has invalid verificationStatus.`, `${dpath}.verificationStatus`));
       }
+      if (d.verificationStatus === 'verified') validateEvidence(d.evidence, `${dpath}.evidence`, errors);
       if (!Array.isArray(d.orderedStopIds)) {
         errors.push(err('malformed_direction', `Direction "${d.id}" needs orderedStopIds.`, `${dpath}.orderedStopIds`));
         return;

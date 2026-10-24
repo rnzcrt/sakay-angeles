@@ -92,7 +92,7 @@ const casingFor2 = casingFor;
 export function addTripLayers(map) {
   const empty = { type: 'FeatureCollection', features: [] };
   map.addSource(TRIP_SRC, { type: 'geojson', data: empty });
-  map.addLayer({ id: 'trip-walk', type: 'line', source: TRIP_SRC, filter: ['==', ['get', 'kind'], 'walk'], layout: { 'line-cap': 'round' }, paint: { 'line-color': '#3b4650', 'line-width': 3, 'line-dasharray': [0.2, 2] } });
+  map.addLayer({ id: 'trip-walk', type: 'line', source: TRIP_SRC, filter: ['==', ['get', 'kind'], 'walk'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#1677d2', 'line-width': 4 } });
   map.addLayer({ id: 'trip-casing', type: 'line', source: TRIP_SRC, filter: ['==', ['get', 'kind'], 'ride'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'casingColor'], 'line-width': 9, 'line-opacity': 0.95 } });
   map.addLayer({ id: 'trip-ride', type: 'line', source: TRIP_SRC, filter: ['==', ['get', 'kind'], 'ride'], layout: { 'line-join': 'round' }, paint: { 'line-color': ['get', 'displayColor'], 'line-width': 5, 'line-dasharray': [2, 1.5] } });
 }
@@ -100,14 +100,15 @@ export function addTripLayers(map) {
 /** legs: [{segment: coords[], displayColor}], walkLines: [[a,b], ...] — pass nothing to clear. */
 export function setTripGeometry(map, legs = [], walkLines = []) {
   const src = map.getSource(TRIP_SRC);
-  if (!src) return;
+  if (!src) return false;
   src.setData({
     type: 'FeatureCollection',
     features: [
       ...legs.map((l) => ({ type: 'Feature', properties: { kind: 'ride', displayColor: l.displayColor, casingColor: casingFor2(l.displayColor) }, geometry: { type: 'LineString', coordinates: l.segment } })),
-      ...walkLines.map((w) => ({ type: 'Feature', properties: { kind: 'walk' }, geometry: { type: 'LineString', coordinates: w } })),
+      ...walkLines.filter((w) => Array.isArray(w) && w.length >= 2).map((w) => ({ type: 'Feature', properties: { kind: 'walk' }, geometry: { type: 'LineString', coordinates: w } })),
     ],
   });
+  return true;
 }
 
 export function fitToCoordinates(map, coords, padding = 60) {

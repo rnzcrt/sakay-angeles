@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#146b4e"><title>Route management — Sakay Angeles</title><link rel="icon" type="image/svg+xml" href="./favicon.svg"></head>
+<body class="admin-body">
+<header class="admin-header"><a class="admin-brand" href="/">↗ Sakay Angeles <small>Private route management</small></a><div><span id="admin-user"></span><button id="signout" class="admin-button secondary" hidden>Sign out</button></div></header>
+<main class="admin-shell">
+  <section id="login-panel" class="admin-card" hidden><p class="eyebrow">Administrator access</p><h1>Manage jeepney routes</h1><p id="login-message">Sign in with an authorized GitHub account to edit route data.</p><a id="login-button" class="admin-button" href="/auth/github">Continue with GitHub</a></section>
+  <div id="workspace" hidden>
+    <div class="admin-heading"><div><p class="eyebrow">Private workspace</p><h1>Route management</h1><p>Changes are saved as unverified until you have enough evidence to review them.</p></div><button id="reload" class="admin-button secondary">Reload data</button></div>
+    <section class="admin-grid">
+      <article class="admin-card"><h2>Routes</h2><label for="route-select">Choose a route</label><select id="route-select"></select><div id="route-summary" class="admin-muted"></div><a id="open-tracer" class="admin-button" href="/trace.html">Open road tracer</a><p class="admin-muted">Trace roads, move or delete points, split directions, or reverse their order. Save geometry from the tracer when ready.</p></article>
+      <article class="admin-card"><h2>Route details</h2><form id="route-form" class="admin-form">
+        <label>Display name<input id="route-name" required maxlength="180"></label><label>Route description<textarea id="route-description" rows="3" maxlength="1200"></textarea></label>
+        <label>Fare class<select id="fare-class"><option value="">Unknown</option><option value="traditional">Traditional jeepney</option><option value="modern">Modern jeepney</option></select></label>
+        <h3>Stops and terminals</h3><div id="stops-list"></div><button id="add-stop" type="button" class="admin-button secondary">Add stop</button>
+        <fieldset class="audit-fields"><legend>Change record (required)</legend><label>What changed?<input id="audit-change" required maxlength="1000"></label><label>Reason<textarea id="audit-reason" required rows="2" maxlength="2000"></textarea></label><label>Information source<input id="audit-source" required maxlength="1000"></label><label>Observation or supporting feedback<textarea id="audit-observation" required rows="2" maxlength="3000"></textarea></label></fieldset>
+        <button class="admin-button" type="submit">Save route details</button>
+      </form></article>
+    </section>
+    <section class="admin-grid below-grid"><article class="admin-card"><h2>Route history</h2><div id="history-list" class="admin-list"></div></article><article class="admin-card"><h2>Community reports</h2><p class="admin-muted">Reports remain separate from route data. Applying a suggestion requires an explicit edit and save.</p><div id="feedback-list" class="admin-list"></div></article></section>
+    <p id="admin-status" class="admin-status" role="status" aria-live="polite"></p>
+  </div>
+</main><script type="module" src="/src/admin.js"></script>
+</body></html>

@@ -7,7 +7,7 @@
 <title>Route tracer — Sakay Angeles</title>
 <script type="module" src="/src/trace.js"></script>
 </head>
-<body>
+<body class="tracer-page">
 <header class="topbar">
   <div class="brand"><div class="brand-mark" aria-hidden="true">✎</div>
     <div>Route tracer<small>Private route management</small></div></div>
@@ -16,7 +16,7 @@
 <div id="status-live" class="visually-hidden" role="status" aria-live="polite"></div>
 <div id="alert-banner" class="alert-banner" role="alert" hidden></div>
 <main class="layout">
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <p class="eyebrow">Contributor tool</p>
     <h1>Trace a route</h1>
     <div class="notice">Lines you draw here are <b>illustrative drafts</b>. They are shown dashed in the app and are <b>never</b> used for trip suggestions until stops and directions are verified.</div>
@@ -102,6 +102,7 @@
   </aside>
   <section class="map-wrap" aria-label="Map">
     <div id="map" class="map"></div>
+    <button type="button" class="map-panel-toggle" id="mobile-panel-toggle" aria-controls="sidebar" aria-expanded="true">Hide tracing tools</button>
     <div class="map-legend" id="trace-legend"></div>
   </section>
 </main>

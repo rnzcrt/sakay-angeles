@@ -43,6 +43,13 @@ export function addRouteLayers(map, geojson, routes) {
   map.addLayer({ id: 'routes-line-draft', type: 'line', source: SRC, layout: { 'line-join': 'round' }, filter: ['!=', ['get', 'geometryStatus'], 'verified'], paint: { 'line-color': ['get', 'displayColor'], 'line-width': 4, 'line-dasharray': [2, 1.5] } });
 }
 
+export function setRouteData(map, geojson, routes) {
+  const source = map.getSource(SRC);
+  if (!source) return false;
+  source.setData(enrichFeatures(geojson, routes));
+  return true;
+}
+
 export function applyVisibility(map, visibleIds, selectedId) {
   if (!map.getLayer('routes-casing')) return;
   const vis = ['in', ['get', 'routeId'], ['literal', visibleIds]];

@@ -8,9 +8,9 @@
 <title>Sakay Angeles — Community Jeepney Guide</title>
 <script type="module" src="/src/main.js"></script>
 </head>
-<body>
-<a class="skip-link" href="#planner">Skip to trip planner</a>
-<header class="topbar">
+<body class="public-page planner-closed sheet-collapsed">
+<a class="skip-link" id="skip-link" href="#planner">Skip to trip planner</a>
+<header class="topbar" id="topbar">
   <div class="brand"><div class="brand-mark" aria-hidden="true">↗</div>
     <div>Sakay Angeles<small>Jeepney route explorer · Angeles City, Pampanga</small></div></div>
   <div class="top-right"><span class="pill pill-warn">Community testing</span></div>
@@ -21,12 +21,14 @@
 
 <main class="layout">
   <aside class="sidebar" id="sidebar">
+    <button type="button" class="sheet-handle" id="sheet-handle" aria-controls="sidebar" aria-expanded="false" aria-label="Expand trip planner"><span></span></button>
+    <div class="planner-head"><h2 id="planner-title" class="section-title" tabindex="-1">Plan a trip</h2><button type="button" class="btn btn-ghost planner-close" id="planner-close" aria-label="Close trip planner">×</button></div>
+    <div class="planner-content">
     <p class="eyebrow">Explore first, then plan</p>
     <h1>Where are you headed?</h1>
     <div id="data-banner" class="notice" role="status">Help improve Sakay Angeles! Routes and fares may need corrections. Send feedback based on your real trip so we can improve this guide.</div>
 
     <section id="planner" class="search-card" aria-labelledby="planner-title">
-      <h2 id="planner-title" class="section-title">Plan a trip</h2>
       <form id="origin-form" class="field" autocomplete="off">
         <label class="field-label" for="origin">Starting point</label>
         <div class="field-row">
@@ -48,17 +50,6 @@
         </div>
         <div class="field-actions">
           <button type="button" class="btn btn-link" data-pick="destination">＋ Pick on map</button>
-        </div>
-        <div class="popular-places" aria-label="Popular Angeles destinations">
-          <span class="field-label">Popular places</span>
-          <button type="button" class="place-chip" data-popular-place="SM City Clark, Angeles City">SM City Clark</button>
-          <button type="button" class="place-chip" data-popular-place="Marquee Mall, Angeles City">Marquee Mall</button>
-          <button type="button" class="place-chip" data-popular-place="Nepo Mall, Angeles City">Nepo Mall</button>
-          <button type="button" class="place-chip" data-popular-place="Holy Angel University, Angeles City">Holy Angel University</button>
-          <button type="button" class="place-chip" data-popular-place="Holy Rosary Parish Church, Angeles City">Holy Rosary Church</button>
-          <button type="button" class="place-chip" data-popular-place="Museo ning Angeles, Angeles City">Museo ning Angeles</button>
-          <button type="button" class="place-chip" data-popular-place="Angeles City Hall, Angeles City">City Hall</button>
-          <button type="button" class="place-chip" data-popular-place="Sacred Heart Medical Center, Angeles City">Sacred Heart Medical Center</button>
         </div>
         <div id="destination-choices" class="choices-box"></div>
       </form>
@@ -95,13 +86,14 @@
       <p>Help improve this community route guide. Route and fare details can change; check with the driver when boarding.</p>
       <p id="attribution-note"></p>
     </footer>
+    </div>
   </aside>
 
-  <section class="map-wrap" aria-label="Map">
+  <section class="map-wrap" id="map-wrap" aria-label="Map">
     <div id="map" class="map"></div>
-    <button type="button" class="map-panel-toggle" id="mobile-panel-toggle" aria-controls="sidebar" aria-expanded="true">Hide trip panel</button>
-    <div id="pick-banner" class="pick-banner" role="status" hidden>
-      <span id="pick-text"></span><button type="button" class="btn btn-ghost" id="pick-cancel">Cancel</button>
+    <button type="button" class="map-panel-toggle" id="mobile-panel-toggle" aria-label="Plan a trip" aria-controls="sidebar" aria-expanded="false"><span class="tab-label" aria-hidden="true">PLAN A TRIP</span></button>
+    <div id="pick-banner" class="pick-banner" role="status" aria-live="polite" hidden>
+      <span class="pick-copy"><strong id="pick-title"></strong><small id="pick-help">Tap the map to choose this location.</small></span><button type="button" class="btn btn-ghost" id="pick-cancel">Cancel</button>
     </div>
     <div class="map-legend" id="map-legend"></div>
     <div id="map-fallback" class="map-fallback" hidden></div>

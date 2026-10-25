@@ -73,6 +73,15 @@ test('the ignore switch, corrupt storage and invalid saved data are handled', ()
   assert.deepEqual(mergeLocalDrafts(shipped, unknownRoute).used, []); // ghost route is not in the route list
 });
 
+test('the public traced-lines preview can override a previously saved ignore preference without changing it', () => {
+  const a = lineFromCoords([[0, 0.01], [0.05, 0.01]], { oneWay: true });
+  const store = memory({ [LOCAL_KEY]: saved([[lineKey('r1', 'a'), a]]), [IGNORE_KEY]: '1' });
+  const preview = mergeLocalDrafts(shipped, store, { ignoreLocal: false });
+  assert.deepEqual(preview.used, ['Route 1']);
+  assert.equal(preview.data.geojson.features.filter((f) => f.properties.routeId === 'r1').length, 1);
+  assert.equal(store.dump()[IGNORE_KEY], '1'); // previewing does not change the tracer preference
+});
+
 test('results note when the return direction may use different streets', () => {
   const legacy = buildDraftLines(shipped.geojson, routes);
   const r = planDraftTrip({ origin: [0.005, 0.0002], destination: [0.045, 0.0002], lines: legacy });

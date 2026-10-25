@@ -1,10 +1,10 @@
 import './styles.css';
 import { MAP_CONFIG, DRAFT_TIME } from './config.js';
 import { loadData } from './data/loadData.js';
-import { mergeLocalDrafts, setIgnoreLocal } from './data/localDrafts.js';
+import { mergeLocalDrafts } from './data/localDrafts.js';
 import { planTrip, buildGraph, PLAN_STATUS } from './routing/planner.js';
 import { createMap } from './map/createMap.js';
-import { addRouteLayers, applyVisibility, onRouteClick, fitToRoutes, makeMarker, addTripLayers, setTripGeometry, fitToCoordinates } from './map/routeLayers.js';
+import { addRouteLayers, setRouteData, applyVisibility, onRouteClick, fitToRoutes, makeMarker, addTripLayers, setTripGeometry, fitToCoordinates } from './map/routeLayers.js';
 import { requestLocation } from './services/geolocation.js';
 import { searchPlaces } from './services/geocoding.js';
 import { routeWalking } from './services/walking.js';
@@ -20,12 +20,21 @@ import { buildFeedbackIssueUrl } from './services/feedback.js';
 
 const $ = (id) => document.getElementById(id);
 const notify = createNotifier({ statusEl: $('status-live'), alertEl: $('alert-banner') });
+const phoneLayout = matchMedia('(max-width: 640px), (max-width: 1000px) and (max-height: 500px)');
 
 const state = {
   data: null,
   graph: null,
   map: null,
   mapReady: false,
+  uiMode: phoneLayout.matches ? 'sheet-collapsed' : 'explore',
+  inputReturnMode: 'sheet-half',
+  pickReturnMode: 'sheet-half',
+  previewSource: 'traced',
+  shippedData: null,
+  tracedData: null,
+  sheetDrag: null,
+  suppressSheetClickUntil: 0,
   selectedRouteId: null,
   visible: new Set(),
   points: { origin: null, destination: null }, // { coordinates, label }
@@ -38,7 +47,7 @@ const state = {
   tripActive: false,
   choices: { origin: [], destination: [] },
   draftLines: [],
-  local: { used: [], hasLocal: false, ignored: false },
+  local: { used: [], hasLocal: false, ignored: false, replaced: false, available: false, error: null },
   storage: null,
   draftResult: null,
   draftIndex: 0,
@@ -70,19 +79,161 @@ function renderRouteList() {
 
 function localNote() {
   if (!import.meta.env.DEV) return '';
-  const { used, hasLocal, ignored, replaced } = state.local;
-  if (replaced) {
-    return `<div class="local-note"><b>Showing only the routes you traced</b> (${used.length} of ${state.data.routes.length}); the old lines are hidden.<button type="button" id="local-toggle">Use the shipped file instead</button></div>`;
+  const { used, available, error } = state.local;
+  if (!available) {
+    const issue = error
+      ? `The saved traced geometry could not be loaded: ${escapeHtml(error)}`
+      : 'No valid locally saved traced geometry was found. Showing the shipped route geometry instead.';
+    return `<div class="local-note"><strong class="source-state">Preview source: Shipped file</strong><p>${issue}</p><button type="button" id="local-toggle" data-preview-source="traced" disabled>My traced lines unavailable</button></div>`;
   }
-  if (used.length) {
-    return `<div class="local-note"><b>Using lines you traced in this browser</b> (route tracer) for: ${used.map(escapeHtml).join(', ')}.<button type="button" id="local-toggle">Use the shipped file instead</button></div>`;
+  if (state.previewSource === 'traced') {
+    const detail = `Showing ${used.length} traced routes. Other shipped geometry is hidden in this preview.`;
+    return `<div class="local-note"><strong class="source-state">Preview source: My traced lines</strong><p>${detail}</p><button type="button" id="local-toggle" data-preview-source="shipped">Use the shipped file instead</button></div>`;
   }
-  if (hasLocal && ignored) return '<div class="local-note">Your traced lines are being ignored.<button type="button" id="local-toggle">Use my traced lines</button></div>';
-  return '';
+  return `<div class="local-note"><strong class="source-state">Preview source: Shipped file</strong><p>Showing the route geometry included in the app’s shipped data.</p><button type="button" id="local-toggle" data-preview-source="traced">Use my traced lines</button></div>`;
 }
 
 function renderDataBanner() {
   $('data-banner').innerHTML = `<b>Help improve Sakay Angeles!</b> We're building a community-powered jeepney guide. Some routes, fares, and directions may need corrections. Send feedback from a route suggestion so we can improve this guide.` + localNote();
+}
+
+function setPreviewSource(source) {
+  if (source === state.previewSource) return;
+  if (source === 'traced' && !state.local.available) return;
+  state.previewSource = source;
+  state.data = source === 'traced' ? state.tracedData : state.shippedData;
+  state.graph = buildGraph(state.data);
+  state.draftLines = buildDraftLines(state.data.geojson, state.data.routes);
+  state.visible = new Set(routesWithGeometry().map((r) => r.id));
+  state.selectedRouteId = null;
+  state.result = null;
+  state.draftResult = null;
+  state.tripActive = false;
+  clearStopMarkers();
+  clearTripGeometry();
+  $('results').replaceChildren();
+  $('route-detail').replaceChildren();
+  renderDataBanner();
+  renderLegend();
+  renderRouteList();
+  if (state.mapReady) {
+    setRouteData(state.map, state.data.geojson, state.data.routes);
+    syncMap();
+    fitToRoutes(state.map, state.data.geojson, [...state.visible]);
+  }
+  notify.status(source === 'traced' ? 'Previewing your locally saved traced lines.' : 'Previewing the shipped route geometry.');
+}
+
+function resizeMapAfterLayout() {
+  requestAnimationFrame(() => requestAnimationFrame(() => state.map?.resize()));
+}
+
+function setUiMode(mode) {
+  const phone = phoneLayout.matches;
+  if (phone && mode === 'explore') mode = 'sheet-collapsed';
+  else if (phone && mode === 'planner') mode = 'sheet-half';
+  else if (!phone && mode === 'sheet-collapsed') mode = 'explore';
+  else if (!phone && (mode === 'sheet-half' || mode === 'sheet-expanded')) mode = 'planner';
+  state.uiMode = mode;
+  const body = document.body;
+  const collapsed = mode === 'explore' || mode === 'sheet-collapsed';
+  const plannerVisible = !collapsed && !(mode === 'pick' && phone);
+  body.classList.toggle('planner-closed', collapsed);
+  body.classList.toggle('planner-open', plannerVisible);
+  body.classList.toggle('sheet-collapsed', mode === 'sheet-collapsed');
+  body.classList.toggle('sheet-half', mode === 'sheet-half');
+  body.classList.toggle('sheet-expanded', mode === 'sheet-expanded');
+  body.classList.toggle('input-takeover', mode === 'input');
+  body.classList.toggle('map-picking', mode === 'pick');
+  $('mobile-panel-toggle').setAttribute('aria-expanded', String(plannerVisible));
+  $('planner-close').textContent = phone
+    ? mode === 'input' ? 'Back' : mode === 'sheet-collapsed' ? 'Open' : 'Collapse'
+    : '×';
+  $('planner-close').setAttribute('aria-label', phone
+    ? mode === 'input' ? 'Back to trip planner' : mode === 'sheet-collapsed' ? 'Expand trip planner' : 'Collapse trip planner'
+    : 'Close trip planner');
+  $('sheet-handle').setAttribute('aria-expanded', String(mode !== 'sheet-collapsed' && !(mode === 'pick' && phone)));
+  $('sheet-handle').setAttribute('aria-label', mode === 'sheet-collapsed' ? 'Expand trip planner' : 'Adjust trip planner sheet');
+
+  const takeover = mode === 'input' && phone;
+  $('map-wrap').inert = takeover;
+  $('topbar').inert = takeover;
+  $('skip-link').inert = takeover;
+  if (takeover) {
+    $('sidebar').setAttribute('role', 'dialog');
+    $('sidebar').setAttribute('aria-modal', 'true');
+    $('sidebar').setAttribute('aria-labelledby', 'planner-title');
+  } else {
+    $('sidebar').removeAttribute('role');
+    $('sidebar').removeAttribute('aria-modal');
+    $('sidebar').removeAttribute('aria-labelledby');
+  }
+  resizeMapAfterLayout();
+}
+
+function syncVisualViewport() {
+  const viewport = window.visualViewport;
+  if (!viewport) return;
+  document.documentElement.style.setProperty('--visual-height', `${viewport.height}px`);
+  document.documentElement.style.setProperty('--visual-offset-top', `${viewport.offsetTop}px`);
+}
+syncVisualViewport();
+window.visualViewport?.addEventListener('resize', syncVisualViewport, { passive: true });
+window.visualViewport?.addEventListener('scroll', syncVisualViewport, { passive: true });
+phoneLayout.addEventListener('change', ({ matches }) => {
+  if (matches && state.uiMode === 'explore') setUiMode('sheet-collapsed');
+  else if (!matches && state.uiMode === 'sheet-collapsed') setUiMode('explore');
+  else setUiMode(state.uiMode);
+});
+
+function bindSheetDrag() {
+  const handle = $('sheet-handle');
+  const sidebar = $('sidebar');
+  const begin = (event) => {
+    if (!phoneLayout.matches || state.uiMode === 'pick' || event.isPrimary === false) return;
+    if (state.uiMode === 'input' && document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    const rect = sidebar.getBoundingClientRect();
+    state.sheetDrag = { pointerId: event.pointerId, startY: event.clientY, lastY: event.clientY, lastTime: performance.now(), height: rect.height, velocity: 0, moved: false };
+    sidebar.classList.add('sheet-dragging');
+    handle.setPointerCapture(event.pointerId);
+  };
+  const move = (event) => {
+    const drag = state.sheetDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const now = performance.now();
+    const deltaTime = Math.max(1, now - drag.lastTime);
+    drag.velocity = (event.clientY - drag.lastY) / deltaTime;
+    drag.lastY = event.clientY;
+    drag.lastTime = now;
+    const dy = event.clientY - drag.startY;
+    drag.moved ||= Math.abs(dy) > 7;
+    const maxHeight = Math.max(116, sidebar.parentElement.clientHeight - 8);
+    sidebar.style.height = `${Math.max(108, Math.min(maxHeight, drag.height - dy))}px`;
+  };
+  const finish = (event) => {
+    const drag = state.sheetDrag;
+    if (!drag || (event?.pointerId != null && drag.pointerId !== event.pointerId)) return;
+    const currentHeight = sidebar.getBoundingClientRect().height;
+    const maxHeight = Math.max(116, sidebar.parentElement.clientHeight - 8);
+    const collapsed = 112;
+    const half = Math.max(collapsed + 42, Math.min(maxHeight, sidebar.parentElement.clientHeight * 0.56));
+    const points = [collapsed, half, maxHeight];
+    let target;
+    if (drag.velocity < -0.55) target = points.find((point) => point > currentHeight + 4) ?? maxHeight;
+    else if (drag.velocity > 0.55) target = [...points].reverse().find((point) => point < currentHeight - 4) ?? collapsed;
+    else target = points.reduce((best, point) => Math.abs(point - currentHeight) < Math.abs(best - currentHeight) ? point : best, points[0]);
+    if (drag.moved) state.suppressSheetClickUntil = performance.now() + 350;
+    state.sheetDrag = null;
+    sidebar.classList.remove('sheet-dragging');
+    sidebar.style.height = '';
+    setUiMode(target === collapsed ? 'sheet-collapsed' : target === maxHeight ? 'sheet-expanded' : 'sheet-half');
+  };
+  handle.addEventListener('pointerdown', begin);
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', finish);
+  handle.addEventListener('pointercancel', finish);
+  handle.addEventListener('lostpointercapture', finish);
 }
 
 function syncMap() {
@@ -160,17 +311,31 @@ function clearStopMarkers() {
 // ---------- map picking ----------
 function startPick(target, sequence = false) {
   if (!state.mapReady) { notify.alert('The map is not available, so picking on the map is not possible. Use search instead.'); return; }
+  if (state.uiMode !== 'pick') {
+    state.pickReturnMode = state.uiMode === 'input' ? state.inputReturnMode : state.uiMode;
+    if (state.pickReturnMode === 'explore' || state.pickReturnMode === 'sheet-collapsed') state.pickReturnMode = 'sheet-half';
+  }
   state.pick = { target, sequence };
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   state.map.getContainer().classList.add('picking');
   $('pick-banner').hidden = false;
-  $('pick-text').textContent = target === 'origin' ? 'Tap the map to set your starting point' : 'Tap the map to set your destination';
-  notify.status($('pick-text').textContent);
+  $('pick-title').textContent = target === 'origin' ? 'Choose your starting point' : 'Choose your destination';
+  $('pick-help').textContent = 'Tap the map to choose this location.';
+  setUiMode('pick');
+  notify.status(`${$('pick-title').textContent}. ${$('pick-help').textContent}`);
 }
 
-function cancelPick() {
+function cancelPick({ restoreFocus = true } = {}) {
+  const target = state.pick?.target;
+  const wasPicking = Boolean(state.pick);
   state.pick = null;
   state.map?.getContainer().classList.remove('picking');
   $('pick-banner').hidden = true;
+  if (wasPicking && state.uiMode === 'pick') {
+    const returnMode = state.pickReturnMode === 'input' ? state.inputReturnMode : state.pickReturnMode;
+    setUiMode(returnMode || (phoneLayout.matches ? 'sheet-half' : 'planner'));
+    if (restoreFocus && target) requestAnimationFrame(() => document.querySelector(`[data-pick="${target}"]`)?.focus());
+  }
 }
 
 function handleMapClick(e) {
@@ -378,6 +543,14 @@ async function findRoute() {
 
 // ---------- events ----------
 function bindEvents() {
+  setUiMode(state.uiMode);
+  bindSheetDrag();
+  $('skip-link').addEventListener('click', (event) => {
+    event.preventDefault();
+    if (state.pick) cancelPick({ restoreFocus: false });
+    setUiMode(phoneLayout.matches ? 'sheet-half' : 'planner');
+    requestAnimationFrame(() => $('planner-title').focus());
+  });
   document.addEventListener('click', (event) => {
     const trigger = event.target.closest('[data-report-routes]');
     if (!trigger) return;
@@ -433,27 +606,73 @@ function bindEvents() {
   $('swap-btn').onclick = swapTrip;
   $('data-banner').addEventListener('click', (e) => {
     if (e.target.id === 'local-toggle') {
-      setIgnoreLocal(state.storage, !state.local.ignored && (state.local.used.length > 0 || state.local.replaced));
-      location.reload();
+      setPreviewSource(e.target.dataset.previewSource);
     }
   });
   $('find-btn').onclick = findRoute;
   $('origin-form').addEventListener('submit', (e) => { e.preventDefault(); runSearch('origin'); });
   $('dest-form').addEventListener('submit', (e) => { e.preventDefault(); runSearch('destination'); });
-  $('dest-form').addEventListener('click', (e) => {
-    const quick = e.target.closest('[data-popular-place]');
-    if (!quick) return;
-    $('destination').value = quick.dataset.popularPlace;
-    clearPoint('destination');
-    runSearch('destination').then((ok) => {
-      if (ok && state.points.origin && state.points.destination) findRoute();
-    });
-  });
   $('origin').addEventListener('input', () => clearPoint('origin'));
   $('destination').addEventListener('input', () => clearPoint('destination'));
+  for (const which of ['origin', 'destination']) {
+    $(which).addEventListener('focus', () => {
+      if (phoneLayout.matches && !state.pick && state.uiMode !== 'input') {
+        state.inputReturnMode = ['sheet-half', 'sheet-expanded'].includes(state.uiMode) ? state.uiMode : 'sheet-half';
+        setUiMode('input');
+      }
+    });
+  }
   document.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => startPick(b.dataset.pick)));
   $('pick-cancel').onclick = () => { cancelPick(); notify.status('Map selection cancelled.'); };
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.pick) { cancelPick(); } });
+  $('mobile-panel-toggle').addEventListener('click', () => {
+    if (state.pick) cancelPick({ restoreFocus: false });
+    setUiMode(state.uiMode === 'explore' ? 'planner' : 'explore');
+  });
+  $('planner-close').addEventListener('click', () => {
+    if (state.pick) { cancelPick({ restoreFocus: false }); setUiMode(phoneLayout.matches ? 'sheet-collapsed' : 'explore'); }
+    else if (phoneLayout.matches && state.uiMode === 'input') {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      setUiMode(state.inputReturnMode);
+      $('planner-close').focus();
+    } else if (phoneLayout.matches) setUiMode(state.uiMode === 'sheet-collapsed' ? 'sheet-half' : 'sheet-collapsed');
+    else {
+      setUiMode('explore');
+      $('mobile-panel-toggle').focus();
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+    if (state.pick) { cancelPick(); e.preventDefault(); return; }
+    if (state.uiMode === 'input') {
+      const choices = $('origin-choices').childElementCount || $('destination-choices').childElementCount;
+      if (choices) {
+        $('origin-choices').replaceChildren();
+        $('destination-choices').replaceChildren();
+        e.preventDefault();
+        return;
+      }
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      setUiMode(state.inputReturnMode);
+      $('planner-close').focus();
+      e.preventDefault();
+    } else if (['sheet-half', 'sheet-expanded'].includes(state.uiMode) && phoneLayout.matches) {
+      setUiMode('sheet-collapsed');
+      $('planner-close').focus();
+      e.preventDefault();
+    } else if (state.uiMode === 'planner') {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && active.matches('input,textarea,select')) return;
+      setUiMode('explore');
+      $('mobile-panel-toggle').focus();
+      e.preventDefault();
+    }
+  });
+  $('sheet-handle').addEventListener('click', (event) => {
+    if (performance.now() < state.suppressSheetClickUntil) { event.preventDefault(); return; }
+    if (state.uiMode === 'sheet-collapsed') setUiMode('sheet-half');
+    else if (state.uiMode === 'sheet-half') setUiMode('sheet-expanded');
+    else if (state.uiMode === 'sheet-expanded') setUiMode('sheet-half');
+  });
 
   $('locate-btn').onclick = async () => {
     notify.status('Requesting your location…');
@@ -513,10 +732,20 @@ async function start() {
     return;
   }
   try { state.storage = window.localStorage; } catch { state.storage = null; }
-  const merged = mergeLocalDrafts(loaded.data, state.storage);
+  state.shippedData = loaded.data;
+  const merged = mergeLocalDrafts(loaded.data, state.storage, { ignoreLocal: false });
   if (merged.error && import.meta.env.DEV) notify.alert(`Your traced lines were not used: ${merged.error}`);
-  state.local = { used: merged.used, hasLocal: merged.hasLocal, ignored: merged.ignored, replaced: merged.replaced };
-  state.data = merged.data;
+  state.tracedData = merged.data;
+  state.local = {
+    used: merged.used,
+    hasLocal: merged.hasLocal,
+    ignored: merged.ignored,
+    replaced: merged.replaced,
+    error: merged.error ?? null,
+    available: !merged.error && merged.used.length > 0,
+  };
+  state.previewSource = state.local.available ? 'traced' : 'shipped';
+  state.data = state.previewSource === 'traced' ? state.tracedData : state.shippedData;
   state.graph = buildGraph(state.data);
   state.draftLines = buildDraftLines(state.data.geojson, state.data.routes);
   state.visible = new Set(routesWithGeometry().map((r) => r.id));

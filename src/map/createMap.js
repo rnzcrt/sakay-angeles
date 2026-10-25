@@ -12,7 +12,7 @@ export function createMap(container, onProblem, { offline = false } = {}) {
   let map;
   const panelToggle = document.getElementById('mobile-panel-toggle');
   const layout = panelToggle?.closest('.layout');
-  if (panelToggle && layout) {
+  if (panelToggle && layout && !document.body.classList.contains('public-page')) {
     const setPanelCollapsed = (collapsed) => {
       layout.classList.toggle('panel-collapsed', collapsed);
       panelToggle.setAttribute('aria-expanded', String(!collapsed));

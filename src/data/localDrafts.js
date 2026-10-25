@@ -23,7 +23,7 @@ export function readLocalLines(storage) {
 }
 
 /** @returns {{data:object, used:string[], hasLocal:boolean, ignored:boolean, error?:string}} */
-export function mergeLocalDrafts(data, storage) {
+export function mergeLocalDrafts(data, storage, { ignoreLocal } = {}) {
   const none = { data, used: [], hasLocal: false, ignored: false, replaced: false };
   let replace = false;
   try { replace = storage?.getItem(REPLACE_KEY) === '1'; } catch { /* ignore */ }
@@ -32,8 +32,11 @@ export function mergeLocalDrafts(data, storage) {
   const localGeo = linesToGeoJson(lines, data.routes);
   if (!localGeo.features.length && !replace) return none;
   const hasLocal = true;
-  let ignored = false;
-  try { ignored = storage.getItem(IGNORE_KEY) === '1'; } catch { /* ignore */ }
+  let ignored = ignoreLocal;
+  if (ignored === undefined) {
+    ignored = false;
+    try { ignored = storage.getItem(IGNORE_KEY) === '1'; } catch { /* ignore */ }
+  }
   if (ignored) return { data, used: [], hasLocal, ignored, replaced: false };
 
   const localRoutes = new Set(localGeo.features.map((f) => f.properties.routeId));

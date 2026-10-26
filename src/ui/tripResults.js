@@ -109,12 +109,15 @@ export function renderDraftResult(result, selectedIndex = 0, { passengerType = '
   const anyTwoWay = result.itineraries.some((it) => it.legs.some((l) => !l.oneWay));
   const twoWayWarn = anyTwoWay ? '<div class="notice notice-soft" role="note">The return direction may use different streets. Please confirm with the driver.</div>' : '';
   const cards = result.itineraries.map((it, i) => {
+    const leastWalkingBadge = it.isLeastWalking
+      ? `<span class="badge">Least walking${it.walkRoutingComplete === true ? '' : ' (estimated)'}</span>`
+      : '';
     if (it.walkingOnly) {
       const walk = it.walkRoutes?.[0];
       const meters = walk?.distanceMeters ?? it.totalWalkMeters;
       const directions = walk?.steps?.length ? `<small><details class="walk-turns"><summary>Show ${walk.steps.length} walking steps</summary><ol>${walk.steps.map((s) => `<li>${escapeHtml(s.instruction)} · ${formatMeters(s.distanceMeters)}</li>`).join('')}</ol></details></small>` : '<small>Walking distance is approximate; no walkable path was available. Check the route before setting out.</small>';
       const steps = `<li class="step"><span class="step-icon" aria-hidden="true">🚶</span><div>Walk to your destination, about <b>${formatMeters(meters)}</b>${directions}</div></li>`;
-      return `<section class="card itinerary${i === selectedIndex ? ' is-selected' : ''}"><h3>Walk (no fare)${i === 0 ? ' <span class="badge">No jeepney fare</span>' : ''}</h3><p class="summary">${walk ? `≈ ${Math.max(1, Math.round(walk.durationSeconds / 60))} min` : `≈ ${it.estimatedMinutes} min`} on foot · walking ≈ ${formatMeters(meters)}</p><ol class="steps">${steps}</ol><button type="button" class="btn btn-secondary" data-draft-itinerary="${i}" aria-pressed="${i === selectedIndex}">Show on map</button>${reportButton(it.legs)}</section>`;
+      return `<section class="card itinerary${i === selectedIndex ? ' is-selected' : ''}"><h3>Walk (no fare)${it.isRecommended ? ' <span class="badge">Recommended option</span>' : ''}${leastWalkingBadge}<span class="badge">No jeepney fare</span></h3><p class="summary">${walk ? `≈ ${Math.max(1, Math.round(walk.durationSeconds / 60))} min` : `≈ ${it.estimatedMinutes} min`} on foot · walking ≈ ${formatMeters(meters)}</p><ol class="steps">${steps}</ol><button type="button" class="btn btn-secondary" data-draft-itinerary="${i}" aria-pressed="${i === selectedIndex}">Show on map</button>${reportButton(it.legs)}</section>`;
     }
     const walkingStep = (index, fallbackMeters) => {
       const walk = it.walkRoutes?.[index];
@@ -150,7 +153,7 @@ export function renderDraftResult(result, selectedIndex = 0, { passengerType = '
     const fares = estimateItineraryFares(it.legs, passengerType);
     const fareTotal = fares.available ? `estimated total fare ${pesoRange(fares.fareRange)}` : 'fare not confirmed';
     const walkQualifier = it.walkRoutingComplete === false ? ' (some distances approximate)' : '';
-    return `<section class="card itinerary${i === selectedIndex ? ' is-selected' : ''}"><h3>${title}${i === 0 ? ' <span class="badge">Recommended option</span>' : ''}${it.isFastest ? ' <span class="badge badge-fast">Fastest (estimated)</span>' : ''}${it.isLeastWalking ? ' <span class="badge">Least walking</span>' : ''}${it.isLowestFare ? ' <span class="badge">Lowest fare</span>' : ''}</h3>
+    return `<section class="card itinerary${i === selectedIndex ? ' is-selected' : ''}"><h3>${title}${it.isRecommended ? ' <span class="badge">Recommended option</span>' : ''}${it.isFastest ? ' <span class="badge badge-fast">Fastest (estimated)</span>' : ''}${leastWalkingBadge}${it.isLowestFare ? ' <span class="badge">Lowest fare</span>' : ''}</h3>
       <p class="summary"><b>≈ ${it.estimatedMinutes} min</b> estimated · ${it.legs.length} jeepney ride${it.legs.length === 1 ? '' : 's'} · walking ≈ ${formatMeters(it.routedWalkMeters ?? it.totalWalkMeters)}${walkQualifier} · ${fareTotal}</p>
       ${fareSummary(it.legs, passengerType)}
       <ol class="steps">${steps.join('')}</ol>

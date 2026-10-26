@@ -13,6 +13,7 @@ import { findNearbyPedestrianFacilities } from './services/pedestrianFacilities.
 import { renderRouteItem, renderRouteDetail, routeHasGeometry } from './ui/routeList.js';
 import { renderPlanResult, renderGeocodeChoices, renderDraftResult } from './ui/tripResults.js';
 import { buildDraftLines, planDraftTrip, DRAFT_STATUS } from './routing/draftPlanner.js';
+import { rankDraftCandidates } from './routing/draftRanking.js';
 import { createNotifier } from './ui/notifications.js';
 import { escapeHtml } from './ui/html.js';
 import { haversineMeters } from './routing/geo.js';
@@ -423,22 +424,14 @@ function paintDraftItinerary(result, selected) {
 }
 
 function rankDraftChoices(result, candidates, selected = null) {
-  candidates.sort((a, b) => a.estimatedMinutes - b.estimatedMinutes ||
-    (a.routedWalkMeters ?? a.totalWalkMeters) - (b.routedWalkMeters ?? b.totalWalkMeters) ||
-    a.transfers - b.transfers || a.id.localeCompare(b.id));
-  candidates.forEach((option, i) => { option.isFastest = i === 0; });
-  const leastWalking = [...candidates].sort((a, b) =>
-    (a.routedWalkMeters ?? a.totalWalkMeters) - (b.routedWalkMeters ?? b.totalWalkMeters) || a.estimatedMinutes - b.estimatedMinutes)[0];
+  const ranking = rankDraftCandidates(candidates);
   const fareOptions = candidates.map((option) => ({ option, fares: estimateItineraryFares(option.legs, state.passengerType) }))
     .filter(({ fares }) => fares.available)
     .sort((a, b) => ((a.fares.totalFare ?? (a.fares.fareRange.min + a.fares.fareRange.max) / 2) - (b.fares.totalFare ?? (b.fares.fareRange.min + b.fares.fareRange.max) / 2)) || a.option.estimatedMinutes - b.option.estimatedMinutes);
   const lowestFare = fareOptions[0]?.option ?? null;
-  candidates.forEach((option) => {
-    option.isLeastWalking = option === leastWalking;
-    option.isLowestFare = option === lowestFare;
-  });
+  candidates.forEach((option) => { option.isLowestFare = option === lowestFare; });
   const displayLimit = result.displayLimit ?? 3;
-  const chosen = [...new Set([selected, candidates[0], leastWalking, lowestFare, ...candidates].filter(Boolean))].slice(0, displayLimit);
+  const chosen = [...new Set([ranking.recommended, selected, ranking.fastest, ranking.leastWalking, lowestFare, ...candidates].filter(Boolean))].slice(0, displayLimit);
   result.candidates = candidates;
   result.itineraries = chosen;
   return chosen;
@@ -476,6 +469,7 @@ function showDraftItinerary(index) {
       }))).then((walkRoutes) => {
         option.walkRoutes = walkRoutes;
         option.walkRoutingComplete = walkRoutes.every(Boolean);
+        option.routedAccessWalkMeters = walkRoutes[0]?.distanceMeters ?? haversineMeters(straightLines[0][0], straightLines[0].at(-1));
         option.routedWalkMeters = Math.round(walkRoutes.reduce((sum, route, i) => sum + (route?.distanceMeters ?? haversineMeters(straightLines[i][0], straightLines[i].at(-1))), 0));
         // Keep candidate connectors separate from display geometry. Only
         // successful foot-network routes are drawn on the map.

@@ -5,8 +5,8 @@
 // near my destination, and where might two lines connect?" Results are rough
 // guidance, never reliable journeys, and the UI must say so.
 //
-// Ranking is by a ROUGH estimated door-to-door time (assumed walking and
-// jeepney speeds plus a waiting allowance, see DRAFT_TIME), then transfers.
+// Recommendations prioritize practical access and total walking, then include
+// transfers and a ROUGH estimated door-to-door time (see DRAFT_TIME).
 // Lines marked one-way (`oneWay: true` in the GeoJSON) are only ridden in the
 // traced direction (a closed loop may wrap around). Older lines with no
 // direction information are treated as two-way. A transfer is assumed only
@@ -15,6 +15,7 @@
 
 import { DRAFT_TIME, PLANNER_DEFAULTS } from '../config.js';
 import { geometryPositions, haversineMeters, isValidLngLat } from './geo.js';
+import { draftAccessibilityScore, rankDraftCandidates } from './draftRanking.js';
 
 export const DRAFT_DEFAULTS = {
   // Walking to the route / from the drop-off is allowed up to this far (a "long walk" note is shown in the UI).
@@ -25,8 +26,6 @@ export const DRAFT_DEFAULTS = {
   walkSearchRadii: [500, 1000, 1800, 2500],
   // The jeepney stops at the kerb on the same side of the road as the person: shift the stop this far toward them.
   kerbMeters: 10,
-  // Options whose total walking differs by less than this count as equally near; time then decides.
-  walkBucketMeters: 100,
   // Treat crossings as easy transfers and allow a short walk between nearby,
   // non-intersecting lines when there is no shared stop.
   maxTransferMeters: 500,
@@ -197,8 +196,8 @@ const makeLeg = (entry, from, to) => ({
   segment: segmentFor(entry, from, to), // only the part actually ridden
 });
 
-// Shortest-path search across every traced jeepney line. Densified line points
-// are graph nodes, consecutive points are ride edges, and nearby points on
+// Access-weighted shortest-path search across every traced jeepney line.
+// Densified line points are graph nodes, consecutive points are ride edges, and nearby points on
 // different route IDs are possible (unverified) transfers. The search has no
 // fixed transfer-count limit; it avoids reboarding a route already used.
 function connectedJourneys(origin, destination, near, options) {
@@ -302,9 +301,11 @@ function connectedJourneys(origin, destination, near, options) {
   const dist = new Float64Array(stateCount); dist.fill(Infinity);
   const prev = new Array(stateCount);
   const stateFor = (id, ridden) => id * 2 + Number(ridden);
+  const walkScore = (meters) => meters + walkMin(meters) * 10;
+  const waitScore = DRAFT_TIME.waitPerBoardingMin * 10;
   for (const s of sources) {
     const state = stateFor(s.id, false);
-    const cost = walkMin(s.candidate.distanceMeters) + DRAFT_TIME.waitPerBoardingMin;
+    const cost = walkScore(s.candidate.distanceMeters) + s.candidate.distanceMeters * 1.5 + waitScore;
     if (cost < dist[state]) { dist[state] = cost; push([cost, state]); }
   }
   while (heap.length) {
@@ -316,10 +317,10 @@ function connectedJourneys(origin, destination, near, options) {
       let extra;
       let nextRidden = ridden;
       if (edge.type === 'ride') {
-        extra = rideMin(edge.meters);
+        extra = rideMin(edge.meters) * 10;
         nextRidden = true;
       } else {
-        extra = walkMin(edge.meters) + DRAFT_TIME.waitPerBoardingMin;
+        extra = walkScore(edge.meters) + 250 + waitScore;
       }
       // Reaching the next route after any partial ride also counts as having
       // ridden; the threshold filters trips that only shuffle at one junction.
@@ -337,8 +338,8 @@ function connectedJourneys(origin, destination, near, options) {
     for (const ridden of [false, true]) {
       if (!ridden) continue;
       const endState = stateFor(target.id, true);
-      const total = dist[endState] + walkMin(target.candidate.distanceMeters);
-      if (!Number.isFinite(total)) continue;
+      const pathScore = dist[endState] + walkScore(target.candidate.distanceMeters);
+      if (!Number.isFinite(pathScore)) continue;
       const states = [endState];
       while (prev[states[0]]) states.unshift(prev[states[0]].state);
       const pathNodes = states.map((s) => nodes[Math.floor(s / 2)]);
@@ -377,22 +378,20 @@ function connectedJourneys(origin, destination, near, options) {
         transferPoint: null,
         totalWalkMeters: Math.round(haversineMeters(origin, pathNodes[0].point) + transferWalkMeters + haversineMeters(destination, pathNodes.at(-1).point)),
         approxRideMeters: Math.round(legs.reduce((sum, leg) => sum + leg.rideMeters, 0)),
-        estimatedMinutes: Math.round(total),
+        estimatedMinutes: Math.round(
+          walkMin(haversineMeters(origin, pathNodes[0].point) + transferWalkMeters + target.candidate.distanceMeters) +
+          rideMin(legs.reduce((sum, leg) => sum + leg.rideMeters, 0)) +
+          DRAFT_TIME.waitPerBoardingMin * legs.length,
+        ),
         id: sequence,
       };
       const old = bestByRouteSequence.get(sequence);
-      if (!old || item.estimatedMinutes < old.estimatedMinutes) bestByRouteSequence.set(sequence, item);
+      if (!old || draftAccessibilityScore(item) < draftAccessibilityScore(old)) bestByRouteSequence.set(sequence, item);
     }
   }
   return [...bestByRouteSequence.values()];
 }
 
-// Default order: the option with the nearest start and drop-off (least walking) first; ties go to the quicker one.
-const compareNearest = (bucket) => (a, b) =>
-  Math.round(a.totalWalkMeters / bucket) - Math.round(b.totalWalkMeters / bucket) ||
-  a.estimatedMinutes - b.estimatedMinutes ||
-  a.transfers - b.transfers ||
-  a.id.localeCompare(b.id);
 const compareFastest = (a, b) =>
   a.estimatedMinutes - b.estimatedMinutes || a.totalWalkMeters - b.totalWalkMeters || a.transfers - b.transfers || a.id.localeCompare(b.id);
 
@@ -474,7 +473,7 @@ export function planDraftTrip({ origin, destination, lines, options = {} }) {
     for (let i = 0; i < it.legs.length - 1; i += 1) it.walkLines.push([it.legs[i].alightPoint, it.legs[i + 1].boardPoint]);
     it.walkLines.push([last.alightPoint, destination]);
     const prev = seen.get(it.id);
-    if (!prev || compareNearest(o.walkBucketMeters)(it, prev) < 0) seen.set(it.id, it);
+    if (!prev || draftAccessibilityScore(it) < draftAccessibilityScore(prev)) seen.set(it.id, it);
   }
   const all = [...seen.values()];
   if (!all.length) {
@@ -494,15 +493,13 @@ export function planDraftTrip({ origin, destination, lines, options = {} }) {
     }
     return { status: DRAFT_STATUS.NONE, message, itineraries: [], details: { originGapMeters: Math.round(originGap), destGapMeters: Math.round(destGap) } };
   }
-  // Show the nearest-start/drop-off options first; make sure the quickest option is among them.
-  const fastest = [...all].sort(compareFastest)[0];
+  // Use access, total walking, transfers, and rough time for the recommendation.
+  // Also keep the independently calculated fastest and least-walk options.
+  const ranking = rankDraftCandidates(all);
   const displayLimit = o.maxAlternatives;
   const candidateLimit = Math.max(displayLimit, Math.floor(options.candidateLimit ?? displayLimit));
-  const itineraries = all.sort(compareNearest(o.walkBucketMeters)).slice(0, candidateLimit);
-  if (!itineraries.includes(fastest)) itineraries[itineraries.length - 1] = fastest;
-  for (const it of itineraries) it.isFastest = it === fastest;
-  const leastWalking = [...all].sort((a, b) => a.totalWalkMeters - b.totalWalkMeters || a.estimatedMinutes - b.estimatedMinutes)[0];
-  for (const it of itineraries) it.isLeastWalking = it === leastWalking;
+  const sorted = [...all].sort((a, b) => draftAccessibilityScore(a) - draftAccessibilityScore(b) || compareFastest(a, b));
+  const itineraries = [...new Set([ranking.recommended, ranking.fastest, ranking.leastWalking, ...sorted].filter(Boolean))].slice(0, candidateLimit);
   return {
     status: DRAFT_STATUS.SUCCESS,
     message: 'Rough guidance from hand-traced, unverified lines. Stops, direction of travel and actual service are unknown.',

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDraftLines, planDraftTrip as planAny, DRAFT_STATUS, shiftToward } from '../src/routing/draftPlanner.js';
+import { rankDraftCandidates } from '../src/routing/draftRanking.js';
 // The original tests describe the strict 500 m walking behaviour; new long-walk tests call planAny directly.
 const planDraftTrip = (a) => planAny({ ...a, options: { maxWalkMeters: 500, ...a.options } });
 import { renderDraftResult } from '../src/ui/tripResults.js';
@@ -248,6 +249,38 @@ test('the option with the nearest start and drop-off is first; the quickest is b
   assert.equal(fastest.estimatedMinutes, bestMinutes);
 });
 
+test('nearby route access outranks a faster line that starts with a long walk', () => {
+  const routeOptions = [
+    { id: 'fast-far', transfers: 0, accessWalkMeters: 380, totalWalkMeters: 760, estimatedMinutes: 24 },
+    { id: 'near-slower', transfers: 0, accessWalkMeters: 55, totalWalkMeters: 120, estimatedMinutes: 32 },
+  ];
+  const { recommended, fastest, leastWalking } = rankDraftCandidates(routeOptions);
+  assert.equal(recommended.id, 'near-slower');
+  assert.equal(fastest.id, 'fast-far');
+  assert.equal(leastWalking.id, 'near-slower');
+});
+
+test('an extra transfer can be recommended when it substantially improves first-leg access and walking', () => {
+  const routeOptions = [
+    { id: 'one-ride', transfers: 0, accessWalkMeters: 420, totalWalkMeters: 850, estimatedMinutes: 28 },
+    { id: 'two-rides', transfers: 1, accessWalkMeters: 45, totalWalkMeters: 220, estimatedMinutes: 34 },
+  ];
+  assert.equal(rankDraftCandidates(routeOptions).recommended.id, 'two-rides');
+});
+
+test('the route search can choose a nearby boarding line connected to the destination route', () => {
+  const network = buildDraftLines({ features: [
+    feat('H', [[0, 0.0002], [0.02, 0.0002]]),
+    feat('V', [[0.02, 0.0002], [0.05, 0]]),
+    feat('F', [[0, 0.004], [0.05, 0.004]]),
+  ] }, routes);
+  const result = planAny({ origin: [0, 0], destination: [0.05, 0], lines: network, options: { maxWalkMeters: 500 } });
+  const recommended = result.itineraries.find((it) => it.isRecommended);
+  assert.ok(recommended, 'has an explicitly ranked recommendation');
+  assert.deepEqual(recommended.legs.map((leg) => leg.routeId), ['H', 'V']);
+  assert.ok(recommended.accessWalkMeters < 50);
+});
+
 test('the stop is on the same side of the road as the person (shifted toward them)', () => {
   const lines = buildDraftLines({ features: [feat('H', [[0, 0], [0.05, 0]])] }, routes);
   // start north of the road, destination south of the road, each ~110 m from the line
@@ -275,5 +308,9 @@ test('results label long walks and show the nearest/fastest badges', () => {
   assert.match(html, /a long walk/);
   assert.match(html, /on foot/);
   assert.match(html, /Least walking/);
+  assert.match(html, /Recommended option/);
+  assert.match(html, /Fastest \(estimated\)/);
+  assert.match(html, /Straight-line estimate/);
+  assert.match(html, /approximate distance only/);
   assert.match(html, /approximate drop-off to your destination/);
 });

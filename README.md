@@ -31,13 +31,19 @@ Configure a GitHub OAuth App with callback URL `<BASE_URL>/auth/callback`, then 
 
 ```text
 BASE_URL="http://localhost:3000"
-GITHUB_CLIENT_ID="Ov23limVoK3tkPcxVYFY"
-GITHUB_CLIENT_SECRET="df3616841ce462c7d054e60ebfe4ed6a1fa33111"
-SESSION_SECRET="fab3b91f4c29677ceb4c6aafcbeebfc09173aa2132c36f499888d4057a1ce3b6e1b904313e7729d4573560cb8580938c"
+GITHUB_CLIENT_ID="set-in-your-deployment-environment"
+GITHUB_CLIENT_SECRET="set-in-your-deployment-environment"
+SESSION_SECRET="set-in-your-deployment-environment"
 ADMIN_GITHUB_USERS="rnzcrt"
 ```
 
-The allowlist is checked on every OAuth login; credentials and OAuth tokens stay on the server. Admin sessions use HttpOnly, SameSite cookies and expire after 12 hours. If OAuth is not configured, admin access remains disabled. Run this app on a Node host with a persistent writable disk; optional `ROUTE_DATA_DIR` and `ROUTE_HISTORY_DIR` can point to persistent storage. Back up both directories.
+The allowlist is checked on every OAuth login; credentials and OAuth tokens stay on the server. Admin sessions use HttpOnly, SameSite cookies and expire after 12 hours. Use a random `SESSION_SECRET` with at least 32 bytes. If OAuth is not configured, admin access remains disabled. Run this app on a Node host with a persistent writable disk; optional `ROUTE_DATA_DIR` and `ROUTE_HISTORY_DIR` can point to persistent storage. Back up both directories.
+
+The application applies per-process rate limits to OAuth and admin writes. If running multiple instances, use a shared rate-limit store or an edge rate limit; the built-in limits do not coordinate between instances. Rate-limit keys use the direct socket address; forwarded client-IP headers are not trusted because the deployment's proxy-header chain has not been verified. `TRUST_PROXY_CLIENT_IP` is not supported.
+
+Security response headers are set by the Node server. Keep the Node server in front of `dist/`; do not serve the build directly from static hosting because that bypasses protected route APIs and these headers.
+
+Credential hygiene: older README revisions in the repository history contained credential-like values assigned to `GITHUB_CLIENT_SECRET` and `SESSION_SECRET`. Treat those historical values as exposed: rotate the GitHub OAuth client secret in GitHub, then update the Render environment variable, and replace `SESSION_SECRET` with a new random value of at least 32 bytes. Rotating the session secret logs out existing admin sessions. The repository history was not rewritten as part of the audit.
 
 **Each jeepney route has two parts: Route 1 and Route 2.**
 1. Pick a route.

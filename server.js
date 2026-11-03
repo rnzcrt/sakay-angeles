@@ -4,6 +4,7 @@ import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateDataset } from './src/data/validate.js';
+import { createRateLimiter } from './src/security/rateLimit.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(ROOT, 'dist');
@@ -11,12 +12,14 @@ const DATA = path.resolve(process.env.ROUTE_DATA_DIR || path.join(ROOT, 'public/
 const HISTORY = path.resolve(process.env.ROUTE_HISTORY_DIR || path.join(ROOT, '.route-history'));
 const PORT = Number(process.env.PORT || 4173);
 const SESSION_TTL = 12 * 60 * 60 * 1000;
+const oauthLimiter = createRateLimiter({ limit: 20, windowMs: 15 * 60_000 });
+const adminLimiter = createRateLimiter({ limit: 60, windowMs: 60_000 });
 const sessions = new Map();
 const oauthStates = new Map();
 const allowedUsers = new Set((process.env.ADMIN_GITHUB_USERS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 let validBaseUrl = false;
 try { const base = new URL(process.env.BASE_URL); validBaseUrl = base.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(base.hostname); } catch { /* unset or malformed */ }
-const configured = Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET && process.env.SESSION_SECRET && validBaseUrl && allowedUsers.size);
+const configured = Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET && Buffer.byteLength(process.env.SESSION_SECRET || '') >= 32 && validBaseUrl && allowedUsers.size);
 const secureCookie = (process.env.BASE_URL || '').startsWith('https://');
 const cookie = (name, value, options = {}) => `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${options.maxAge ?? 43200}${secureCookie ? '; Secure' : ''}`;
 const signSession = (id) => createHmac('sha256', process.env.SESSION_SECRET || '').update(id).digest('hex');
@@ -39,7 +42,8 @@ function sessionFor(req) {
   session.expires = Date.now() + SESSION_TTL;
   return session;
 }
-async function body(req, maxBytes = 8_000_000) {
+async function body(req, maxBytes = 4_000_000) {
+  if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) throw Object.assign(new Error('Content-Type must be application/json.'), { status: 415 });
   const chunks = []; let size = 0;
   for await (const chunk of req) { size += chunk.length; if (size > maxBytes) throw Object.assign(new Error('Request is too large.'), { status: 413 }); chunks.push(chunk); }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw Object.assign(new Error('Invalid JSON body.'), { status: 400 }); }
@@ -99,7 +103,56 @@ function sameOrigin(req) {
   return origin === expected;
 }
 
+function requestAddress(req) {
+  // Render's public proxy chain does not provide a documented, verifiable
+  // trust boundary for these headers. Do not let request headers choose a key.
+  return req.socket.remoteAddress || 'unknown';
+}
+
+function securityHeaders() {
+  const headers = {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self)',
+    'Content-Security-Policy': "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://github.com; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://fonts.openmaptiles.org; img-src 'self' data: blob: https:; worker-src 'self' blob:; connect-src 'self' https://tiles.openfreemap.org https://nominatim.openstreetmap.org https://router.project-osrm.org https://routing.openstreetmap.de https://overpass-api.de https://api.github.com; upgrade-insecure-requests",
+  };
+  if (secureCookie) headers['Strict-Transport-Security'] = 'max-age=31536000';
+  return headers;
+}
+
+function changedRouteIds(before, next) {
+  const ids = new Set();
+  const routes = new Map(before.routes.map((route) => [route.id, route]));
+  for (const route of next.routes) if (JSON.stringify(route) !== JSON.stringify(routes.get(route.id))) ids.add(route.id);
+  const groupedFeatures = (features) => {
+    const result = new Map();
+    for (const feature of features) {
+      const id = feature.properties?.routeId;
+      result.set(id, [...(result.get(id) || []), feature]);
+    }
+    return result;
+  };
+  const oldFeatures = groupedFeatures(before.geojson.features);
+  const newFeatures = groupedFeatures(next.geojson.features);
+  for (const id of new Set([...oldFeatures.keys(), ...newFeatures.keys()])) {
+    if (JSON.stringify(oldFeatures.get(id) || []) !== JSON.stringify(newFeatures.get(id) || [])) ids.add(id);
+  }
+  const groupedStops = (stops) => {
+    const result = new Map();
+    for (const stop of stops) result.set(stop.routeId, [...(result.get(stop.routeId) || []), stop]);
+    return result;
+  };
+  const oldStops = groupedStops(before.stops);
+  const newStops = groupedStops(next.stops);
+  for (const id of new Set([...oldStops.keys(), ...newStops.keys()])) {
+    if (JSON.stringify(oldStops.get(id) || []) !== JSON.stringify(newStops.get(id) || [])) ids.add(id);
+  }
+  return ids;
+}
+
 const server = http.createServer(async (req, res) => {
+  for (const [name, value] of Object.entries(securityHeaders())) res.setHeader(name, value);
   try {
     const url = new URL(req.url, process.env.BASE_URL || `http://localhost:${PORT}`);
     let pathname = decodeURIComponent(url.pathname);
@@ -109,6 +162,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && pathname === '/auth/github') {
       if (!configured) return json(res, 503, { error: 'Administrator access is not configured on this server.' });
+      const rate = oauthLimiter(requestAddress(req)); if (!rate.allowed) return json(res, 429, { error: 'Too many sign-in attempts. Try again later.' }, { 'Retry-After': String(rate.retryAfter) });
+      for (const [state, expiry] of oauthStates) if (expiry <= Date.now()) oauthStates.delete(state);
+      if (oauthStates.size >= 10_000) return json(res, 503, { error: 'Sign-in is temporarily unavailable. Try again shortly.' });
       const state = randomBytes(24).toString('hex'); oauthStates.set(state, Date.now() + 10 * 60_000);
       const redirect = new URL('https://github.com/login/oauth/authorize');
       redirect.searchParams.set('client_id', process.env.GITHUB_CLIENT_ID);
@@ -117,6 +173,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(302, { Location: redirect.toString(), 'Set-Cookie': cookie('sakay_oauth_state', state, { maxAge: 600 }), 'Cache-Control': 'no-store' }); return res.end();
     }
     if (req.method === 'GET' && pathname === '/auth/callback') {
+      const rate = oauthLimiter(requestAddress(req)); if (!rate.allowed) return json(res, 429, { error: 'Too many sign-in attempts. Try again later.' }, { 'Retry-After': String(rate.retryAfter) });
       const cookies = parseCookies(req); const state = url.searchParams.get('state');
       if (!configured || !state || cookies.sakay_oauth_state !== state || !oauthStates.has(state) || oauthStates.get(state) < Date.now()) return json(res, 400, { error: 'Sign-in could not be verified. Try again.' });
       oauthStates.delete(state);
@@ -125,6 +182,8 @@ const server = http.createServer(async (req, res) => {
       const profileRes = await fetch('https://api.github.com/user', { headers: { Authorization: `Bearer ${tokenData.access_token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'Sakay-Angeles' } });
       const profile = await profileRes.json(); const login = String(profile.login || '').toLowerCase();
       if (!profileRes.ok || !allowedUsers.has(login)) return json(res, 403, { error: 'This GitHub account is not authorized to manage routes.' }, { 'Set-Cookie': cookie('sakay_oauth_state', '', { maxAge: 0 }) });
+      for (const [id, session] of sessions) if (session.expires <= Date.now()) sessions.delete(id);
+      if (sessions.size >= 10_000) return json(res, 503, { error: 'Administrator sign-in is temporarily unavailable.' });
       const sessionId = randomBytes(32).toString('hex'); sessions.set(sessionId, { login, token: tokenData.access_token, expires: Date.now() + SESSION_TTL });
       res.writeHead(302, { Location: '/admin/routes', 'Set-Cookie': [cookie('sakay_admin', `${sessionId}.${signSession(sessionId)}`), cookie('sakay_oauth_state', '', { maxAge: 0 })], 'Cache-Control': 'no-store' }); return res.end();
     }
@@ -133,6 +192,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (pathname.startsWith('/api/admin/')) {
       const session = sessionFor(req); if (!session) return json(res, 401, { error: 'Administrator sign-in required.' });
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        const rate = adminLimiter(session.login); if (!rate.allowed) return json(res, 429, { error: 'Too many changes. Try again shortly.' }, { 'Retry-After': String(rate.retryAfter) });
+      }
       if (req.method === 'GET' && pathname === '/api/admin/dataset') return json(res, 200, await readData());
       if (req.method === 'GET' && pathname === '/api/admin/history') return json(res, 200, await historyList());
       if (req.method === 'GET' && pathname === '/api/admin/history/item') {
@@ -145,6 +207,10 @@ const server = http.createServer(async (req, res) => {
         if (!d || !Array.isArray(d.routes) || !Array.isArray(d.stops) || !Array.isArray(d.transfers) || !d.geojson || !Array.isArray(d.geojson.features) ||
             !Array.isArray(payload.editedRouteIds) || payload.editedRouteIds.length === 0 || !payload.editedRouteIds.every((id) => before.routes.some((r) => r.id === id))) return json(res, 400, { error: 'Invalid route dataset or edited route list.' });
         if (d.routes.length !== before.routes.length || d.routes.some((r) => !r || !before.routes.some((old) => old.id === r.id))) return json(res, 400, { error: 'Route identifiers cannot be added or removed here.' });
+        const actualEditedIds = changedRouteIds(before, d);
+        const declaredEditedIds = new Set(payload.editedRouteIds);
+        if (!actualEditedIds.size || actualEditedIds.size !== declaredEditedIds.size || [...actualEditedIds].some((id) => !declaredEditedIds.has(id))) return json(res, 400, { error: 'editedRouteIds must list exactly the changed routes; empty saves are not accepted.' });
+        if (JSON.stringify(before.transfers) !== JSON.stringify(d.transfers)) return json(res, 400, { error: 'Transfer records cannot be changed through route geometry editing.' });
         d.routesFile = before.routesFile; d.stopsFile = before.stopsFile;
         markEditedUnverified(d, payload.editedRouteIds, before);
         const check = datasetValidation(d); if (!check.valid) return json(res, 422, { error: 'Route data did not pass validation.', details: check.errors.slice(0, 20) });
@@ -198,8 +264,11 @@ const server = http.createServer(async (req, res) => {
     if (!file.startsWith(`${DIST}${path.sep}`) && file !== path.join(DIST, 'index.html')) return json(res, 404, { error: 'Not found.' });
     const bytes = await readFile(file);
     const ext = path.extname(file); const type = ({ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' })[ext] || 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': type, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Cache-Control': ext === '.html' ? 'no-store' : 'public, max-age=3600' }); res.end(bytes);
-  } catch (error) { json(res, error.status || 500, { error: error.message || 'Server error.' }); }
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': ext === '.html' ? 'no-store' : 'public, max-age=3600' }); res.end(bytes);
+  } catch (error) {
+    const status = error.status || 500;
+    json(res, status, { error: status >= 500 ? 'Server error.' : error.message || 'Request could not be processed.' });
+  }
 });
 
 server.listen(PORT, process.env.HOST, () => console.log(`Sakay Angeles listening on http://localhost:${PORT}${configured ? '' : ' (admin OAuth not configured)'}`));

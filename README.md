@@ -1,5 +1,11 @@
 # Sakay Angeles — Jeepney Route Explorer (prototype)
 
+[![Project status: prototype](https://img.shields.io/badge/status-prototype-7A8F5A)](#)
+[![Node.js](https://img.shields.io/badge/Node.js-20.19%2B%20%7C%2022.12%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![JavaScript](https://img.shields.io/badge/JavaScript-ES%20modules-F7DF1E?logo=javascript&logoColor=black)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
+[![MapLibre GL JS](https://img.shields.io/badge/MapLibre-GL%20JS-396CB2)](https://maplibre.org/)
+[![AI-assisted with ChatGPT](https://img.shields.io/badge/AI%20assistance-ChatGPT-74AA9C)](chatgpt.md)
+
 A mobile-friendly web prototype for exploring jeepney routes in Angeles City, Pampanga, Philippines, built around the supplied *HERE Angeles + Clark* route maps.
 
 > **Honest status:** this is **not** a navigation service. The A/B terminal endpoints on the supplied route traces are verified from the project owner's real-world observations. The traced path between endpoints, intermediate boarding/drop-off points, service directions, and transfers still need verification. The app shows those limits in trip suggestions and does not show live vehicles, arrival times, fares or authoritative directions.
@@ -89,7 +95,7 @@ tests/                    node:test suites (+ synthetic fixtures)
 assets/reference-maps/    the three supplied source images
 docs/                     ROUTE_DATA_GUIDE.md · TEST_PLAN.md
 .github/workflows/        CI validation and build (no static deployment)
-CLAUDE_PROMPT.md          the engineering brief this refactor followed
+chatgpt.md                AI assistance and project attribution
 ```
 
 ## Route data
@@ -109,6 +115,9 @@ Distances are straight-line estimates. No travel times are produced.
 
 ## Privacy
 Location is requested only after you press *Use my location* and is used in your browser. Place searches you submit are sent to Nominatim (OpenStreetMap); map tiles are fetched from OpenFreeMap. Route data is served by this project's Node server. GitHub OAuth tokens are kept in server memory and are used only for administrator access and report moderation.
+
+## AI Assistance & Credits
+ChatGPT assisted the project maintainer with brainstorming and planning, code development and implementation guidance, debugging and troubleshooting, UI/UX improvements, documentation and README writing, and security reviews and testing guidance. The maintainer directed the project, made the decisions, reviewed and tested suggestions and code, and chose what to integrate. ChatGPT is an AI assistant; it is not the owner or creator of Sakay Angeles. See [`chatgpt.md`](chatgpt.md) for fuller attribution details.
 
 ## Deployment
 Deploy the repository to a Node.js host that supports environment secrets and a persistent writable disk, then run `npm ci`, `npm run build`, and `npm start`. Static hosting such as GitHub Pages cannot enforce the administrator boundary or persist route edits, so the GitHub workflow only validates and builds. Set `BASE_URL` to the public HTTPS origin and configure the OAuth variables above before enabling route management.

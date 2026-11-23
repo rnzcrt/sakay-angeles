@@ -404,7 +404,7 @@ function bind() {
       const old = current.geojson.features.find((f) => f.properties?.routeId === feature.properties?.routeId && (f.properties?.direction || 'a') === (feature.properties?.direction || 'a'));
       return old ? { ...feature, properties: { ...old.properties, ...feature.properties } } : feature;
     });
-    const response = await fetch('/api/admin/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: { ...current, geojson: nextGeo }, editedRouteIds: changed, audit: { ...audit, date: new Date().toISOString().slice(0, 10) } }) });
+    const response = await fetch('/api/admin/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: { ...current, geojson: nextGeo }, editedRouteIds: changed, expectedCommitSha: current.commitSha, audit: { ...audit, date: new Date().toISOString().slice(0, 10) } }) });
     const result = await response.json();
     if (!response.ok) { notify.alert(result.details?.[0]?.message || result.error || 'Route geometry could not be saved.'); return; }
     notify.status(`Saved ${changed.length} changed route${changed.length === 1 ? '' : 's'} as revision ${result.revision}. Route status remains unverified.`);

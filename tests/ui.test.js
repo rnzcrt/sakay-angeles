@@ -24,6 +24,19 @@ test('9. route item shows text, not just color, and disables toggle without geom
   assert.match(html, /disabled/);
 });
 
+test('ready-to-trace route shows its status and vehicle details without a map line', () => {
+  const route = real.find((r) => r.id === 'angeles-san-fernando');
+  const list = renderRouteItem(route, { hasGeometry: false, visible: false });
+  assert.match(list, /Angeles City – San Fernando City/);
+  assert.match(list, /Silver jeepney · Ready for tracing/);
+  assert.match(list, /disabled/);
+  assert.doesNotMatch(list, /checked/);
+  const detail = renderRouteDetail(route, { hasGeometry: false });
+  assert.match(detail, /Traditional Philippine jeepney/);
+  assert.match(detail, /Requested direction.*Angeles City to San Fernando City/);
+  assert.match(detail, /Needs confirmation/);
+});
+
 test('9. itinerary rendering uses planner metadata', () => {
   const data = makeData();
   data.routes[0].name = 'Metadata Route';

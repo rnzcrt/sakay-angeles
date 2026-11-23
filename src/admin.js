@@ -93,7 +93,7 @@ $('stops-list').addEventListener('click', (e) => {
 });
 $('route-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  try { gatherRouteEdits(); const result = await api('/api/admin/save', { method: 'POST', body: JSON.stringify({ data: dataset, editedRouteIds: [selectedId], audit: audit() }) }); announce(`Saved. Revision ${result.revision} created; changed route details remain unverified.`); await loadAll(); }
+  try { gatherRouteEdits(); const result = await api('/api/admin/save', { method: 'POST', body: JSON.stringify({ data: dataset, editedRouteIds: [selectedId], expectedCommitSha: dataset.commitSha, audit: audit() }) }); announce(`Saved as revision ${result.revision.slice(0, 8)}; changed route details remain unverified.`); await loadAll(); }
   catch (err) { announce(err.message, true); }
 });
 $('history-list').addEventListener('click', async (e) => {
@@ -108,7 +108,7 @@ $('history-list').addEventListener('click', async (e) => {
     return;
   }
   const id = e.target.closest('[data-history]')?.dataset.history; if (!id) return;
-  try { const item = await api(`/api/admin/history/item?id=${encodeURIComponent(id)}`); const ok = confirm(`Revision ${new Date(item.createdAt).toLocaleString()}\n\n${item.audit?.change}\nReason: ${item.audit?.reason}\nSource: ${item.audit?.source}\n\nRestore this complete route dataset?`); if (!ok) return; const result = await api('/api/admin/restore', { method: 'POST', body: JSON.stringify({ id }) }); announce(`Restored previous data. Recovery revision ${result.revision} created; route geometry and directions remain unverified.`); await loadAll(); } catch (err) { announce(err.message, true); }
+  try { const item = await api(`/api/admin/history/item?id=${encodeURIComponent(id)}`); const ok = confirm(`Revision ${new Date(item.createdAt).toLocaleString()}\n\n${item.audit?.change}\nReason: ${item.audit?.reason}\nSource: ${item.audit?.source}\n\nRestore this complete route dataset?`); if (!ok) return; const result = await api('/api/admin/restore', { method: 'POST', body: JSON.stringify({ id, expectedCommitSha: dataset.commitSha }) }); announce(`Restored previous data in revision ${result.revision.slice(0, 8)}; route geometry and directions remain unverified.`); await loadAll(); } catch (err) { announce(err.message, true); }
 });
 $('feedback-list').addEventListener('click', async (e) => {
   const number = e.target.closest('[data-review]')?.dataset.review; if (!number) return;

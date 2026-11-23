@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRateLimiter } from '../src/security/rateLimit.js';
+import { loadData } from '../src/data/loadData.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -23,15 +24,11 @@ test('rate limiter expires attempts and caps the key set', () => {
 });
 
 test('Node server enforces OAuth/admin boundaries and keeps route save/history isolated', async (t) => {
-  const temp = await mkdtemp(path.join(os.tmpdir(), 'sakay-security-'));
-  const dataDir = path.join(temp, 'data'); const historyDir = path.join(temp, 'history');
-  await mkdir(dataDir); await mkdir(historyDir);
-  for (const name of ['routes.json', 'stops.json', 'routes.geojson']) {
-    await writeFile(path.join(dataDir, name), await readFile(path.join(root, 'public/data', name)));
-  }
   const probe = createServer(); await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
   const { port } = probe.address(); await new Promise((resolve) => probe.close(resolve));
   const base = `http://127.0.0.1:${port}`;
+  const mockLogDir = mkdtempSync(path.join(os.tmpdir(), 'sakay-feedback-test-'));
+  const mockWriteLog = path.join(mockLogDir, 'writes.log');
   const allowlist = process.env.ADMIN_GITHUB_USERS || 'allowed-admin';
   const child = spawn(process.execPath, ['--import', path.join(root, 'tests/mock-github.mjs'), path.join(root, 'server.js')], {
     cwd: root, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', BASE_URL: base,
@@ -39,10 +36,13 @@ test('Node server enforces OAuth/admin boundaries and keeps route save/history i
       SESSION_SECRET: process.env.SESSION_SECRET || 'test-only-session-secret-with-more-than-32-bytes', ADMIN_GITHUB_USERS: allowlist,
       TRUST_PROXY_CLIENT_IP: 'true',
       MOCK_GITHUB_LOGIN: allowlist.split(',')[0].trim(),
-      ROUTE_DATA_DIR: dataDir, ROUTE_HISTORY_DIR: historyDir },
+      MOCK_FEEDBACK_FAILURE: 'delete-label,create-label,comment,patch-issue',
+      MOCK_GITHUB_WRITE_LOG: mockWriteLog,
+      SAKAY_DATA_GITHUB_TOKEN: 'test-data-token', SAKAY_DATA_GITHUB_OWNER: 'test-owner',
+      SAKAY_DATA_GITHUB_REPO: 'test-data', SAKAY_DATA_GITHUB_BRANCH: 'main' },
     stdio: ['ignore', 'ignore', 'ignore'],
   });
-  t.after(async () => { child.kill('SIGTERM'); await new Promise((resolve) => { child.once('exit', resolve); setTimeout(resolve, 1500); }); await rm(temp, { recursive: true, force: true }); });
+  t.after(async () => { child.kill('SIGTERM'); await new Promise((resolve) => { child.once('exit', resolve); setTimeout(resolve, 1500); }); rmSync(mockLogDir, { recursive: true, force: true }); });
   let ready = false;
   for (let i = 0; i < 80; i += 1) {
     try { if ((await fetch(`${base}/api/admin/session`)).ok) { ready = true; break; } } catch { /* starting */ }
@@ -95,18 +95,107 @@ test('Node server enforces OAuth/admin boundaries and keeps route save/history i
   const adminCookie = sessionCookie.split(';')[0];
   const headers = { Cookie: adminCookie };
   const originHeaders = { ...headers, Origin: base };
+  response = await fetch(`${base}/api/admin/feedback` , { headers });
+  assert.equal(response.status, 200, 'feedback list is loaded from the mocked GitHub API');
+  assert.equal((await response.json())[0].number, 123);
+  response = await fetch(`${base}/api/admin/feedback/status`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ number: 0, status: 'resolved' }) });
+  assert.equal(response.status, 400, 'invalid issue numbers are rejected');
+  response = await fetch(`${base}/api/admin/feedback/status`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ number: 123, status: 'resolved', note: { credential: 'invalid' } }) });
+  assert.equal(response.status, 400, 'notes must be bounded plain text');
+
+  const submitFeedbackStatus = (number, status, note) => fetch(`${base}/api/admin/feedback/status`, {
+    method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ number, status, ...(note === undefined ? {} : { note }) }),
+  });
+  const resetWrites = () => writeFileSync(mockWriteLog, '');
+  const writes = () => readFileSync(mockWriteLog, 'utf8');
+
+  resetWrites();
+  response = await submitFeedbackStatus(124, 'accepted');
+  assert.equal(response.status, 400, 'an issue with ordinary labels but no community-feedback label is rejected');
+  assert.equal(writes(), '', 'unrelated issues cause no GitHub writes, including label creation');
+  resetWrites();
+  response = await submitFeedbackStatus(125, 'accepted');
+  assert.equal(response.status, 400, 'pull requests are rejected');
+  assert.equal(writes(), '', 'pull requests cause no GitHub writes');
+  resetWrites();
+  response = await submitFeedbackStatus(126, 'accepted');
+  assert.equal(response.status, 400, 'issues without a labels array are rejected');
+  assert.equal(writes(), '', 'malformed issues cause no GitHub writes');
+  resetWrites();
+  response = await submitFeedbackStatus(127, 'accepted');
+  assert.equal(response.status, 404, 'a missing issue is reported as not found');
+  assert.equal(writes(), '', 'missing issues cause no GitHub writes');
+
+  resetWrites();
+  response = await submitFeedbackStatus(123, 'accepted');
+  assert.equal(response.status, 200, 'a valid community-feedback issue can be updated');
+  const afterValidStatus = await (await fetch(`${base}/api/admin/feedback`, { headers })).json();
+  assert.ok(afterValidStatus[0].labels.includes('triaged'), 'ordinary issue labels are preserved');
+
+  resetWrites();
+  response = await submitFeedbackStatus(123, 'needs-information');
+  assert.equal(response.status, 502, 'a failed status-label creation is not reported as success');
+  assert.match((await response.json()).error, /prepare the report status label/i);
+  assert.match(writes(), /^POST labels\n$/);
+  resetWrites();
+  response = await submitFeedbackStatus(123, 'accepted', 'Synthetic comment failure.');
+  assert.equal(response.status, 502, 'a failed comment is not reported as success');
+  assert.match((await response.json()).error, /could not add the review note/i);
+  assert.match(writes(), /POST issues\/123\/comments/);
+  resetWrites();
+  response = await submitFeedbackStatus(123, 'accepted');
+  assert.equal(response.status, 502, 'a failed issue-state update is not reported as success');
+  assert.match((await response.json()).error, /could not update the report state/i);
+  assert.match(writes(), /PATCH issues\/123/);
+
+  resetWrites();
+  response = await fetch(`${base}/api/admin/feedback/status`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ number: 123, status: 'rejected', note: 'Synthetic partial failure test.' }) });
+  assert.equal(response.status, 502, 'failed cleanup after applying a status label is not reported as success');
+  assert.match((await response.json()).error, /new status label was applied/i);
   assert.equal((await fetch(`${base}/api/admin/dataset`, { headers })).status, 200);
   response = await fetch(`${base}/admin.html`, { headers, redirect: 'manual' });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-store');
 
-  const original = JSON.parse(await readFile(path.join(dataDir, 'routes.geojson'), 'utf8'));
+  response = await fetch(`${base}/api/routes`);
+  assert.equal(response.status, 200, 'public route data is served through the public API');
+  const publicData = await response.json();
+  assert.ok(publicData.routes.length > 0);
+  assert.doesNotMatch(JSON.stringify(publicData), /test-data-token/);
+  assert.doesNotMatch(JSON.stringify(publicData), /fixture-admin-only-value/, 'public API allowlists fields instead of forwarding private repository metadata');
+  const serializedPublic = JSON.stringify(publicData);
+  for (const marker of ['private-direction-sentinel', 'private-evidence-sentinel', 'private-deep-direction-sentinel', 'private-direction-object-sentinel', 'private-secondary-sentinel', 'private-array-element-sentinel', 'private-deep-secondary-sentinel', 'private-secondary-array-deep-sentinel', 'private-geometry-nested-sentinel']) {
+    assert.doesNotMatch(serializedPublic, new RegExp(marker), `nested private marker ${marker} is excluded`);
+  }
+  const projectedRoute = publicData.routes.find((route) => route.id === 'm-gate-friendship');
+  assert.equal(projectedRoute.directions[0].label, 'Public direction label');
+  assert.deepEqual(projectedRoute.directions[0].orderedStopIds, ['m-gate-friendship-terminal-a', 'm-gate-friendship-terminal-b']);
+  assert.equal(projectedRoute.directions[0].evidence.source, 'Public evidence source');
+  assert.equal(projectedRoute.secondarySources[1].roads[0], 'Public road');
+  assert.deepEqual(projectedRoute.geometryEvidence, { source: 'Public geometry evidence source', method: 'Public geometry evidence method', checkedAt: '2026-01-01' });
+  assert.deepEqual(projectedRoute.fareClassEvidence, { source: 'Public fare evidence source', method: 'Public fare evidence method', checkedAt: '2026-01-02' });
+  assert.equal(publicData.geojson.features[0].geometry.type, 'LineString');
+  for (const marker of ['private-geometry-evidence-sentinel', 'private-geometry-evidence-id', 'private-geometry-evidence-nested-sentinel', 'private-geometry-evidence-array-sentinel', 'private-fare-evidence-sentinel', 'private-fare-evidence-id', 'private-fare-evidence-nested-sentinel', 'private-fare-evidence-array-sentinel']) {
+    assert.doesNotMatch(serializedPublic, new RegExp(marker), `route evidence excludes ${marker}`);
+  }
+  const loadedPublicData = await loadData('/', async () => Response.json(publicData));
+  assert.equal(loadedPublicData.ok, true, 'client-side validation accepts the API projection with route evidence');
+  assert.equal(loadedPublicData.data.routes.find((route) => route.id === 'angeles-san-fernando').geometryEvidence, undefined, 'missing optional evidence remains valid for the current draft route');
+  const verifiedExample = structuredClone(publicData);
+  const verifiedExampleRoute = verifiedExample.routes.find((route) => route.id === 'm-gate-friendship');
+  verifiedExampleRoute.geometryStatus = 'verified';
+  verifiedExampleRoute.fareClass = 'traditional';
+  assert.equal((await loadData('/', async () => Response.json(verifiedExample))).ok, true, 'projected evidence satisfies client validation when geometry and fare class are verified');
+  assert.equal((await fetch(`${base}/data/routes.json`)).status, 404, 'static repository copies are not served');
   const dataset = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  const historicalDataset = structuredClone(dataset);
   const feature = dataset.geojson.features[0];
   const routeId = feature.properties.routeId;
+  const originalGeometry = structuredClone(feature.geometry);
   const target = feature.geometry.type === 'LineString' ? feature.geometry.coordinates : feature.geometry.coordinates[0];
   target[0] = [target[0][0] + 0.0001, target[0][1]];
-  const payload = { data: dataset, editedRouteIds: [routeId], audit: { change: 'Adjust route trace', reason: 'Test verification only', source: 'Automated test fixture', observation: 'Temporary integration test; not real route evidence.' } };
+  const payload = { data: dataset, editedRouteIds: [routeId], expectedCommitSha: dataset.commitSha, audit: { change: 'Adjust route trace', reason: 'Test verification only', source: 'Automated test fixture', observation: 'Temporary integration test; not real route evidence.' } };
 
   response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   assert.equal(response.status, 401, 'protected writes reject users without an admin session');
@@ -128,24 +217,73 @@ test('Node server enforces OAuth/admin boundaries and keeps route save/history i
   unrelatedPath[0] = [unrelatedPath[0][0] + 0.0001, unrelatedPath[0][1]];
   response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(tampered) });
   assert.equal(response.status, 400, 'undeclared route changes are rejected');
+  const invalidDataset = structuredClone(payload);
+  const invalidFeature = invalidDataset.data.geojson.features.find((candidate) => candidate.properties.routeId === routeId);
+  invalidFeature.geometry.coordinates[0] = [999, 999];
+  response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(invalidDataset) });
+  assert.equal(response.status, 422, 'invalid datasets do not create a remote commit');
 
   response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   assert.equal(response.status, 200);
   const { revision } = await response.json();
-  const saved = JSON.parse(await readFile(path.join(dataDir, 'routes.geojson'), 'utf8'));
-  assert.notDeepEqual(saved.features[0].geometry, original.features[0].geometry);
-  assert.equal((await (await fetch(`${base}/api/admin/history`, { headers })).json()).length, 1);
+  const firstSaved = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  assert.notDeepEqual(firstSaved.geojson.features.find((item) => item.properties.routeId === routeId).geometry, originalGeometry);
+  const refreshedPublicData = await (await fetch(`${base}/api/routes`)).json();
+  assert.deepEqual(refreshedPublicData.geojson.features.find((item) => item.properties.routeId === routeId).geometry, firstSaved.geojson.features.find((item) => item.properties.routeId === routeId).geometry);
+  assert.equal((await (await fetch(`${base}/api/admin/history`, { headers })).json()).length, 2);
   const historyResponse = await fetch(`${base}/api/admin/history/item?id=${encodeURIComponent(revision)}`, { headers });
   assert.equal(historyResponse.status, 200);
-  const oldSnapshot = await historyResponse.json();
-  assert.deepEqual(oldSnapshot.data.geojson.features[0].geometry, original.features[0].geometry);
-  response = await fetch(`${base}/api/admin/restore`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: revision }) });
-  assert.equal(response.status, 200);
-  const restored = JSON.parse(await readFile(path.join(dataDir, 'routes.geojson'), 'utf8'));
-  assert.deepEqual(restored.features[0].geometry, original.features[0].geometry);
+  const revisionSnapshot = await historyResponse.json();
+  assert.deepEqual(revisionSnapshot.data.geojson.features.find((item) => item.properties.routeId === routeId).geometry, firstSaved.geojson.features.find((item) => item.properties.routeId === routeId).geometry);
+  const historicalRoute = dataset.routes.find((item) => item.id === routeId);
+  assert.equal(historicalRoute.geometryStatus, 'verified');
+  assert.equal(historicalRoute.fareClass, 'traditional');
+  assert.equal(historicalRoute.fareClassEvidence.source, 'Public fare evidence source');
+  assert.equal(historicalRoute.fareClassEvidence.method, 'Public fare evidence method');
+  assert.equal(historicalRoute.fareClassEvidence.checkedAt, '2026-01-02');
+  assert.equal(historicalRoute.directions[0].verificationStatus, 'verified');
+  assert.ok(historicalRoute.geometryEvidence);
+  assert.ok(historicalRoute.directions[0].evidence);
 
-  response = await fetch(`${base}/api/admin/history/item?id=2026-01-01T00-00-00.000Z-deadbeef`, { headers });
-  assert.equal(response.status, 500);
+  const secondDataset = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  const secondFeature = secondDataset.geojson.features.find((item) => item.properties.routeId === routeId);
+  const secondPath = secondFeature.geometry.coordinates;
+  secondPath[1] = [secondPath[1][0] + 0.0001, secondPath[1][1]];
+  const secondPayload = { data: secondDataset, editedRouteIds: [routeId], expectedCommitSha: secondDataset.commitSha,
+    audit: { change: 'Second test adjustment', reason: 'Test history rollback', source: 'Automated test fixture', observation: 'Temporary test data only.' } };
+  response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(secondPayload) });
+  assert.equal(response.status, 200);
+  const secondCommitSha = (await response.json()).commitSha;
+  assert.equal((await (await fetch(`${base}/api/admin/history`, { headers })).json()).length, 3);
+  response = await fetch(`${base}/api/admin/restore`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: dataset.commitSha, expectedCommitSha: secondCommitSha }) });
+  assert.equal(response.status, 200);
+  const restoredRevision = (await response.json()).commitSha;
+  const restored = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  assert.deepEqual(restored.geojson.features.find((item) => item.properties.routeId === routeId).geometry, historicalDataset.geojson.features.find((item) => item.properties.routeId === routeId).geometry);
+  assert.deepEqual(restored.stops, dataset.stops, 'restore preserves historical stops');
+  assert.deepEqual(restored.transfers, dataset.transfers, 'restore preserves historical transfers');
+  assert.deepEqual(restored.geojson.features.map((item) => item.geometry), historicalDataset.geojson.features.map((item) => item.geometry), 'restore preserves all historical GeoJSON geometry');
+  assert.ok(restored.geojson.features.every((item) => item.properties.draft === true), 'restore marks every GeoJSON feature as draft');
+  const restoredRoute = restored.routes.find((item) => item.id === routeId);
+  assert.equal(restoredRoute.geometryStatus, 'unverified');
+  assert.equal(restoredRoute.fareClass, historicalRoute.fareClass, 'fare classification is preserved independently from geometry verification');
+  assert.deepEqual(restoredRoute.fareClassEvidence, historicalRoute.fareClassEvidence, 'valid fare evidence is preserved');
+  assert.equal(Object.hasOwn(restoredRoute, 'geometryEvidence'), false, 'route geometry evidence is removed');
+  assert.ok(restoredRoute.directions.every((item) => item.verificationStatus === 'unverified'));
+  assert.ok(restoredRoute.directions.every((item) => !Object.hasOwn(item, 'evidence')), 'direction evidence is removed');
+  const historyAfterRestore = await (await fetch(`${base}/api/admin/history`, { headers })).json();
+  assert.equal(historyAfterRestore.length, 4, 'restore adds a commit without rewriting existing history');
+  assert.equal(historyAfterRestore[0].commitSha, restoredRevision);
+  assert.deepEqual(new Set(historyAfterRestore.map((item) => item.commitSha)), new Set([dataset.commitSha, revision, secondCommitSha, restoredRevision]), 'restored source revision and both later commits remain in history');
+
+  response = await fetch(`${base}/api/admin/restore`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: dataset.commitSha, expectedCommitSha: secondCommitSha }) });
+  assert.equal(response.status, 409, 'stale expectedCommitSha rejects restoration');
+  const historyAfterStaleRestore = await (await fetch(`${base}/api/admin/history`, { headers })).json();
+  assert.equal(historyAfterStaleRestore.length, 4, 'stale restoration does not create a commit');
+  assert.equal(historyAfterStaleRestore[0].commitSha, restoredRevision, 'stale restoration leaves the branch head unchanged');
+
+  response = await fetch(`${base}/api/admin/history/item?id=${'a'.repeat(40)}`, { headers });
+  assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: 'Server error.' });
   response = await fetch(`${base}/auth/logout`, { method: 'POST', headers: originHeaders });
   assert.equal(response.status, 204);
@@ -168,7 +306,9 @@ test('missing and short session secrets leave admin authentication disabled', as
     const child = spawn(process.execPath, [path.join(root, 'server.js')], {
       cwd: root, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', BASE_URL: base,
         GITHUB_CLIENT_ID: 'test-client-id', GITHUB_CLIENT_SECRET: 'test-client-secret',
-        SESSION_SECRET: sessionSecret, ADMIN_GITHUB_USERS: 'allowed-admin' },
+        SESSION_SECRET: sessionSecret, ADMIN_GITHUB_USERS: 'allowed-admin',
+        SAKAY_DATA_GITHUB_TOKEN: 'test-data-token', SAKAY_DATA_GITHUB_OWNER: 'test-owner',
+        SAKAY_DATA_GITHUB_REPO: 'test-data', SAKAY_DATA_GITHUB_BRANCH: 'main' },
       stdio: ['ignore', 'ignore', 'ignore'],
     });
     let stopped = false;

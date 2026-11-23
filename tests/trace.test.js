@@ -40,7 +40,7 @@ test('export writes one feature per direction with direction, oneWay and termina
 test('single-point and empty lines are not exported; exports validate', () => {
   const lines = new Map(routes.flatMap((r) => [[lineKey(r.id, 'a'), lineFromCoords(line3, { oneWay: true })], [lineKey(r.id, 'b'), lineFromCoords(line3.slice(0, 1))]]));
   const geo = linesToGeoJson(lines, routes);
-  assert.equal(geo.features.length, 11);
+  assert.equal(geo.features.length, routes.length);
   assert.deepEqual(validateDraftExport(geo, routes).errors, []);
 });
 

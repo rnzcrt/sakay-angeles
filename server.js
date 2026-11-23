@@ -1,16 +1,28 @@
 import http from 'node:http';
-import { readFile, writeFile, mkdir, readdir, rename } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateDataset } from './src/data/validate.js';
 import { createRateLimiter } from './src/security/rateLimit.js';
+import { createGitHubDataStore, GitHubDataStoreError } from './src/security/githubDataStore.js';
+import { loadLocalEnvironment } from './scripts/load-local-env.js';
+
+loadLocalEnvironment();
+
+const PORT = Number(process.env.PORT || 4173);
+const dataStore = createGitHubDataStore();
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(ROOT, 'dist');
-const DATA = path.resolve(process.env.ROUTE_DATA_DIR || path.join(ROOT, 'public/data'));
-const HISTORY = path.resolve(process.env.ROUTE_HISTORY_DIR || path.join(ROOT, '.route-history'));
-const PORT = Number(process.env.PORT || 4173);
+
+const PUBLIC_ROUTE_FIELDS = ['id', 'name', 'sourceLabel', 'sourceSubLabel', 'jeepneyColorName', 'displayColor', 'fareClass', 'fareClassEvidence', 'geometryStatus', 'geometryEvidence', 'tracingStatus', 'vehicleType', 'description', 'sourceLandmarks', 'labelNotes', 'source', 'requestedDirection'];
+const PUBLIC_STOP_FIELDS = ['id', 'routeId', 'name', 'kind', 'terminalLabel', 'verificationStatus', 'source', 'notes'];
+const PUBLIC_TRANSFER_FIELDS = ['id', 'fromStopId', 'toStopId', 'walkMeters', 'verificationStatus', 'source', 'notes'];
+const PUBLIC_GEOMETRY_FIELDS = ['routeId', 'directionId', 'geometryId', 'direction', 'oneWay', 'draft', 'startName', 'endName', 'startStopId', 'endStopId', 'endpointVerificationStatus', 'endpointSource'];
+const PUBLIC_EVIDENCE_FIELDS = ['source', 'method', 'checkedAt'];
+const PUBLIC_DIRECTION_FIELDS = ['id', 'geometryId', 'orderedStopIds', 'verificationStatus', 'label'];
+const PUBLIC_SECONDARY_SOURCE_FIELDS = ['source', 'status', 'matchToLegend', 'startPoint', 'endPoint', 'roads', 'landmarks', 'conflictsWithLegend'];
 const SESSION_TTL = 12 * 60 * 60 * 1000;
 const oauthLimiter = createRateLimiter({ limit: 20, windowMs: 15 * 60_000 });
 const adminLimiter = createRateLimiter({ limit: 60, windowMs: 60_000 });
@@ -48,16 +60,66 @@ async function body(req, maxBytes = 4_000_000) {
   for await (const chunk of req) { size += chunk.length; if (size > maxBytes) throw Object.assign(new Error('Request is too large.'), { status: 413 }); chunks.push(chunk); }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw Object.assign(new Error('Invalid JSON body.'), { status: 400 }); }
 }
-async function readData() {
-  const [routesFile, stopsFile, geojson] = await Promise.all(['routes.json', 'stops.json', 'routes.geojson'].map((f) => readFile(path.join(DATA, f), 'utf8').then(JSON.parse)));
-  return { routesFile, stopsFile, routes: routesFile.routes, stops: stopsFile.stops, transfers: stopsFile.transfers ?? [], geojson };
-}
-async function atomicWrite(file, value) {
-  const temp = `${file}.${randomBytes(5).toString('hex')}.tmp`;
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  await rename(temp, file);
+async function readData({ refresh = false } = {}) {
+  const snapshot = await dataStore.load({ refresh });
+  const data = { ...snapshot, routes: snapshot.routesFile.routes, stops: snapshot.stopsFile.stops, transfers: snapshot.stopsFile.transfers ?? [] };
+  const check = datasetValidation(data);
+  if (!check.valid) throw new GitHubDataStoreError('INVALID_DATA', 'The private route dataset failed validation. No data was served or changed.', 503);
+  return data;
 }
 function datasetValidation(d) { return validateDataset({ routes: d.routes, stops: d.stops, transfers: d.transfers, geojson: d.geojson }); }
+function publicRecord(record, fields) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return {};
+  return Object.fromEntries(fields.filter((field) => {
+    if (!Object.hasOwn(record, field)) return false;
+    const value = record[field];
+    return value === null || typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value));
+  }).map((field) => [field, record[field]]));
+}
+function publicStringArray(value) { return Array.isArray(value) ? value.filter((item) => typeof item === 'string') : []; }
+function publicEvidence(value) { return publicRecord(value, PUBLIC_EVIDENCE_FIELDS); }
+function publicDirection(value) {
+  const result = publicRecord(value, PUBLIC_DIRECTION_FIELDS);
+  if (Array.isArray(value?.orderedStopIds)) result.orderedStopIds = publicStringArray(value.orderedStopIds);
+  if (value?.evidence && typeof value.evidence === 'object' && !Array.isArray(value.evidence)) result.evidence = publicEvidence(value.evidence);
+  return result;
+}
+function publicSecondarySource(value) {
+  const result = publicRecord(value, PUBLIC_SECONDARY_SOURCE_FIELDS);
+  for (const field of ['roads', 'landmarks', 'conflictsWithLegend']) if (Object.hasOwn(value || {}, field)) result[field] = publicStringArray(value[field]);
+  return result;
+}
+function publicRoute(value) {
+  const result = publicRecord(value, PUBLIC_ROUTE_FIELDS);
+  for (const field of ['sourceLandmarks', 'labelNotes']) if (Object.hasOwn(value || {}, field)) result[field] = publicStringArray(value[field]);
+  if (value?.directions !== undefined) result.directions = Array.isArray(value.directions) ? value.directions.filter((item) => item && typeof item === 'object' && !Array.isArray(item)).map(publicDirection) : [];
+  if (value?.secondarySources !== undefined) result.secondarySources = Array.isArray(value.secondarySources) ? value.secondarySources.filter((item) => item && typeof item === 'object' && !Array.isArray(item)).map(publicSecondarySource) : [];
+  for (const field of ['fareClassEvidence', 'geometryEvidence']) {
+    if (!Object.hasOwn(value || {}, field) || value[field] === undefined) continue;
+    if (value[field] === null) result[field] = null;
+    else if (value[field] && typeof value[field] === 'object' && !Array.isArray(value[field])) result[field] = publicEvidence(value[field]);
+    else delete result[field];
+  }
+  return result;
+}
+function publicCoordinates(value) {
+  if (!Array.isArray(value)) return undefined;
+  if (value.length === 2 && value.every((n) => typeof n === 'number' && Number.isFinite(n))) return [...value];
+  if (value.length && value.every(Array.isArray)) return value.map(publicCoordinates).filter((item) => item !== undefined);
+  return undefined;
+}
+function publicGeometry(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (value.type === 'LineString') {
+    const coordinates = publicCoordinates(value.coordinates);
+    return coordinates?.length >= 2 && coordinates.every((p) => Array.isArray(p) && p.length === 2) ? { type: 'LineString', coordinates } : null;
+  }
+  if (value.type === 'MultiLineString') {
+    const coordinates = publicCoordinates(value.coordinates);
+    return coordinates?.length && coordinates.every((line) => Array.isArray(line) && line.length >= 2 && line.every((p) => Array.isArray(p) && p.length === 2)) ? { type: 'MultiLineString', coordinates } : null;
+  }
+  return null;
+}
 function markEditedUnverified(d, routeIds, before) {
   const ids = new Set(routeIds);
   d.routes = d.routes.map((route) => {
@@ -73,25 +135,12 @@ function markEditedUnverified(d, routeIds, before) {
     return { ...rest, verificationStatus: 'unverified' };
   });
 }
-async function saveRevision(before, audit, author) {
-  await mkdir(HISTORY, { recursive: true, mode: 0o700 });
-  const id = `${new Date().toISOString().replaceAll(':', '-')}-${randomBytes(4).toString('hex')}`;
-  const record = { id, createdAt: new Date().toISOString(), author, audit, data: before };
-  await atomicWrite(path.join(HISTORY, `${id}.json`), record);
-  return id;
-}
-async function historyList() {
-  await mkdir(HISTORY, { recursive: true, mode: 0o700 });
-  const files = (await readdir(HISTORY)).filter((f) => f.endsWith('.json')).sort().reverse();
-  return Promise.all(files.map(async (f) => { const { id, createdAt, author, audit } = JSON.parse(await readFile(path.join(HISTORY, f), 'utf8')); return { id, createdAt, author, audit }; }));
-}
-async function writeDataset(d) {
-  await mkdir(DATA, { recursive: true });
-  await Promise.all([
-    atomicWrite(path.join(DATA, 'routes.json'), d.routesFile),
-    atomicWrite(path.join(DATA, 'stops.json'), { ...d.stopsFile, stops: d.stops, transfers: d.transfers }),
-    atomicWrite(path.join(DATA, 'routes.geojson'), d.geojson),
-  ]);
+async function writeDataset(d, { expectedCommitSha, audit, author }) {
+  return dataStore.createDatasetCommit({
+    routesFile: d.routesFile,
+    stopsFile: { ...d.stopsFile, stops: d.stops, transfers: d.transfers },
+    geojson: d.geojson,
+  }, { expectedCommitSha, audit, author });
 }
 function validAudit(a) {
   return a && ['change', 'reason', 'source', 'observation'].every((k) => typeof a[k] === 'string' && a[k].trim().length > 0) && a.change.length <= 1000 && a.reason.length <= 2000 && a.source.length <= 1000 && a.observation.length <= 3000;
@@ -115,7 +164,8 @@ function securityHeaders() {
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self)',
-    'Content-Security-Policy': "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://github.com; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://fonts.openmaptiles.org; img-src 'self' data: blob: https:; worker-src 'self' blob:; connect-src 'self' https://tiles.openfreemap.org https://nominatim.openstreetmap.org https://router.project-osrm.org https://routing.openstreetmap.de https://overpass-api.de https://api.github.com; upgrade-insecure-requests",
+    'Content-Security-Policy': "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://github.com; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://fonts.openmaptiles.org; img-src 'self' data: blob: https:; worker-src 'self' blob:; connect-src 'self' https://tiles.openfreemap.org https://nominatim.openstreetmap.org https://router.project-osrm.org https://routing.openstreetmap.de https://overpass-api.de; upgrade-insecure-requests",
+
   };
   if (secureCookie) headers['Strict-Transport-Security'] = 'max-age=31536000';
   return headers;
@@ -195,15 +245,19 @@ const server = http.createServer(async (req, res) => {
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         const rate = adminLimiter(session.login); if (!rate.allowed) return json(res, 429, { error: 'Too many changes. Try again shortly.' }, { 'Retry-After': String(rate.retryAfter) });
       }
-      if (req.method === 'GET' && pathname === '/api/admin/dataset') return json(res, 200, await readData());
-      if (req.method === 'GET' && pathname === '/api/admin/history') return json(res, 200, await historyList());
+      if (req.method === 'GET' && pathname === '/api/admin/dataset') return json(res, 200, await readData({ refresh: true }));
+      if (req.method === 'GET' && pathname === '/api/admin/history') return json(res, 200, await dataStore.listHistory());
       if (req.method === 'GET' && pathname === '/api/admin/history/item') {
-        const id = url.searchParams.get('id'); if (!/^[0-9TZ.-]+-[a-f0-9]+$/.test(id || '')) return json(res, 400, { error: 'Invalid revision id.' });
-        const record = JSON.parse(await readFile(path.join(HISTORY, `${id}.json`), 'utf8')); return json(res, 200, record);
+        const id = url.searchParams.get('id'); if (!/^[a-f0-9]{40}$/i.test(id || '')) return json(res, 400, { error: 'Invalid revision id.' });
+        const [record, history] = await Promise.all([dataStore.loadAtRevision(id), dataStore.listHistory()]);
+        const metadata = history.find((item) => item.id === id);
+        if (!metadata) return json(res, 404, { error: 'Route data revision not found.' });
+        return json(res, 200, { ...metadata, data: { ...record, routes: record.routesFile.routes, stops: record.stopsFile.stops, transfers: record.stopsFile.transfers ?? [] } });
       }
       if (req.method === 'POST' && pathname === '/api/admin/save') {
         const payload = await body(req); if (!validAudit(payload.audit)) return json(res, 400, { error: 'Change, reason, source, and observation are required.' });
-        const before = await readData(); const d = payload.data;
+        const before = await readData({ refresh: true }); const d = payload.data;
+        if (!/^[a-f0-9]{40}$/i.test(payload.expectedCommitSha || '') || payload.expectedCommitSha !== before.commitSha) return json(res, 409, { error: 'Route data changed since you loaded it. Reload the latest data before saving.' });
         if (!d || !Array.isArray(d.routes) || !Array.isArray(d.stops) || !Array.isArray(d.transfers) || !d.geojson || !Array.isArray(d.geojson.features) ||
             !Array.isArray(payload.editedRouteIds) || payload.editedRouteIds.length === 0 || !payload.editedRouteIds.every((id) => before.routes.some((r) => r.id === id))) return json(res, 400, { error: 'Invalid route dataset or edited route list.' });
         if (d.routes.length !== before.routes.length || d.routes.some((r) => !r || !before.routes.some((old) => old.id === r.id))) return json(res, 400, { error: 'Route identifiers cannot be added or removed here.' });
@@ -215,47 +269,120 @@ const server = http.createServer(async (req, res) => {
         markEditedUnverified(d, payload.editedRouteIds, before);
         const check = datasetValidation(d); if (!check.valid) return json(res, 422, { error: 'Route data did not pass validation.', details: check.errors.slice(0, 20) });
         const audit = { ...payload.audit, date: new Date().toISOString().slice(0, 10) };
-        const revision = await saveRevision(before, audit, session.login);
         d.routesFile.routes = d.routes;
-        await writeDataset(d); return json(res, 200, { ok: true, revision });
+        const saved = await writeDataset(d, { expectedCommitSha: payload.expectedCommitSha, audit, author: session.login });
+        return json(res, 200, { ok: true, revision: saved.commitSha, commitSha: saved.commitSha });
       }
       if (req.method === 'POST' && pathname === '/api/admin/restore') {
-        const payload = await body(req); if (!/^[0-9TZ.-]+-[a-f0-9]+$/.test(payload.id || '')) return json(res, 400, { error: 'Invalid revision id.' });
-        const record = JSON.parse(await readFile(path.join(HISTORY, `${payload.id}.json`), 'utf8'));
-        const current = await readData(); const revision = await saveRevision(current, { change: `Restored revision ${payload.id}`, reason: 'Administrator requested rollback', source: 'Route history', observation: 'Previous saved dataset restored; route data remains unverified.' }, session.login);
-        const restored = record.data; restored.routes = restored.routes.map((r) => ({ ...r, geometryStatus: 'unverified', directions: (r.directions ?? []).map((d) => ({ ...d, verificationStatus: 'unverified' })) }));
-        restored.routesFile.routes = restored.routes;
-        await writeDataset(restored); return json(res, 200, { ok: true, revision });
+        const payload = await body(req);
+        if (!/^[a-f0-9]{40}$/i.test(payload.id || '') || !/^[a-f0-9]{40}$/i.test(payload.expectedCommitSha || '')) return json(res, 400, { error: 'Invalid route data revision.' });
+        const current = await readData({ refresh: true });
+        if (payload.expectedCommitSha !== current.commitSha) return json(res, 409, { error: 'Route data changed since you loaded it. Reload the latest data before restoring.' });
+        const record = await dataStore.loadAtRevision(payload.id);
+        const restored = {
+          ...record,
+          routes: record.routesFile.routes.map((r) => {
+            const { geometryEvidence, ...route } = r;
+            return { ...route, geometryStatus: 'unverified', directions: (route.directions ?? []).map(({ evidence, ...direction }) => ({ ...direction, verificationStatus: 'unverified' })) };
+          }),
+          stops: record.stopsFile.stops,
+          transfers: record.stopsFile.transfers ?? [],
+        };
+        restored.geojson = { ...restored.geojson, features: restored.geojson.features.map((feature) => ({ ...feature, properties: { ...feature.properties, draft: true } })) };
+        restored.routesFile = { ...record.routesFile, routes: restored.routes };
+        restored.stopsFile = { ...record.stopsFile, stops: record.stopsFile.stops, transfers: record.stopsFile.transfers ?? [] };
+        const check = datasetValidation(restored); if (!check.valid) return json(res, 422, { error: 'Saved revision did not pass route validation.' });
+        const saved = await writeDataset(restored, {
+          expectedCommitSha: payload.expectedCommitSha,
+          audit: { change: `Restored route data revision ${payload.id.slice(0, 8)}`, reason: 'Administrator requested restoration of a saved dataset.', source: 'Private route data commit history', observation: 'Restored data is retained as unverified until reviewed.' },
+          author: session.login,
+        });
+        return json(res, 200, { ok: true, revision: saved.commitSha, commitSha: saved.commitSha });
       }
       if (req.method === 'GET' && pathname === '/api/admin/feedback') {
-        const resIssues = await fetch('https://api.github.com/repos/rnzcrt/sakay-angeles/issues?state=open&per_page=100&labels=community-feedback', { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Sakay-Angeles' } });
-        if (!resIssues.ok) return json(res, 502, { error: 'Could not load GitHub community reports.' });
-        const issues = await resIssues.json(); return json(res, 200, issues.filter((i) => !i.pull_request).map(({ number, title, html_url, body: issueBody, created_at, labels }) => ({ number, title, url: html_url, body: issueBody, createdAt: created_at, labels: labels.map((l) => l.name) })));
+        try {
+          const resIssues = await fetch('https://api.github.com/repos/rnzcrt/sakay-angeles/issues?state=open&per_page=100&labels=community-feedback', { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Sakay-Angeles' } });
+          if (!resIssues.ok) return json(res, 502, { error: 'Could not load GitHub community reports.' });
+          const issues = await resIssues.json();
+          if (!Array.isArray(issues)) return json(res, 502, { error: 'GitHub returned an invalid community report response.' });
+          return json(res, 200, issues.filter((i) => i && typeof i === 'object' && !i.pull_request && Number.isSafeInteger(i.number) && Array.isArray(i.labels))
+            .map(({ number, title, html_url, body: issueBody, created_at, labels }) => ({ number, title, url: html_url, body: issueBody, createdAt: created_at, labels: labels.filter((labelItem) => typeof labelItem?.name === 'string').map((labelItem) => labelItem.name) })));
+        } catch { return json(res, 502, { error: 'Could not load GitHub community reports.' }); }
       }
       if (req.method === 'POST' && pathname === '/api/admin/feedback/status') {
-        const p = await body(req); if (!Number.isInteger(p.number) || !['accepted', 'rejected', 'resolved', 'needs-information'].includes(p.status)) return json(res, 400, { error: 'Invalid report status.' });
+        const p = await body(req); if (!Number.isSafeInteger(p.number) || p.number < 1 || !['accepted', 'rejected', 'resolved', 'needs-information'].includes(p.status) || (p.note !== undefined && (typeof p.note !== 'string' || p.note.length > 2000))) return json(res, 400, { error: 'Invalid report status or note.' });
         const label = `feedback-${p.status}`;
         const ghHeaders = { Authorization: `Bearer ${session.token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'Sakay-Angeles' };
-        const labelCheck = await fetch(`https://api.github.com/repos/rnzcrt/sakay-angeles/labels/${encodeURIComponent(label)}`, { headers: ghHeaders });
-        if (labelCheck.status === 404) await fetch('https://api.github.com/repos/rnzcrt/sakay-angeles/labels', { method: 'POST', headers: { ...ghHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: label, color: p.status === 'rejected' ? 'b60205' : p.status === 'resolved' ? '0e8a16' : '1d76db', description: `Maintainer review status: ${p.status}` }) });
-        const existingIssue = await fetch(`https://api.github.com/repos/rnzcrt/sakay-angeles/issues/${p.number}`, { headers: ghHeaders });
-        if (!existingIssue.ok) return json(res, 502, { error: 'Could not load that GitHub report.' });
-        for (const oldLabel of (await existingIssue.json()).labels.map((l) => l.name).filter((name) => name.startsWith('feedback-'))) {
-          await fetch(`https://api.github.com/repos/rnzcrt/sakay-angeles/issues/${p.number}/labels/${encodeURIComponent(oldLabel)}`, { method: 'DELETE', headers: ghHeaders });
+        let statusLabelApplied = false;
+        try {
+          const apiRoot = 'https://api.github.com/repos/rnzcrt/sakay-angeles';
+          const existingIssue = await fetch(`${apiRoot}/issues/${p.number}`, { headers: ghHeaders });
+          if (existingIssue.status === 404) return json(res, 404, { error: 'That GitHub community report was not found.' });
+          if (!existingIssue.ok) return json(res, 502, { error: 'Could not load that GitHub report.' });
+          const issue = await existingIssue.json();
+          if (!issue || issue.pull_request || issue.number !== p.number || !Array.isArray(issue.labels)) return json(res, 400, { error: 'The requested GitHub item is not a valid community report.' });
+          if (!issue.labels.some((item) => item && typeof item.name === 'string' && item.name === 'community-feedback')) return json(res, 400, { error: 'The requested GitHub issue is not a community-feedback report.' });
+
+          const labelCheck = await fetch(`${apiRoot}/labels/${encodeURIComponent(label)}`, { headers: ghHeaders });
+          if (labelCheck.status === 404) {
+            const createdLabel = await fetch(`${apiRoot}/labels`, { method: 'POST', headers: { ...ghHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: label, color: p.status === 'rejected' ? 'b60205' : p.status === 'resolved' ? '0e8a16' : '1d76db', description: `Maintainer review status: ${p.status}` }) });
+            if (!createdLabel.ok) {
+              if (createdLabel.status !== 422) return json(res, 502, { error: 'GitHub could not prepare the report status label.' });
+              const concurrentLabel = await fetch(`${apiRoot}/labels/${encodeURIComponent(label)}`, { headers: ghHeaders });
+              if (!concurrentLabel.ok) return json(res, 502, { error: 'GitHub could not verify the report status label.' });
+            }
+          } else if (!labelCheck.ok) return json(res, 502, { error: 'GitHub could not verify the report status label.' });
+
+          const result = await fetch(`${apiRoot}/issues/${p.number}/labels`, { method: 'POST', headers: { ...ghHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ labels: [label] }) });
+          if (!result.ok) return json(res, 502, { error: 'GitHub could not apply the report status label.' });
+          statusLabelApplied = true;
+
+          for (const oldLabel of issue.labels.filter((item) => typeof item?.name === 'string').map((item) => item.name).filter((name) => name.startsWith('feedback-') && name !== label)) {
+            const removed = await fetch(`${apiRoot}/issues/${p.number}/labels/${encodeURIComponent(oldLabel)}`, { method: 'DELETE', headers: ghHeaders });
+            if (!removed.ok && removed.status !== 404) return json(res, 502, { error: 'The new status label was applied, but GitHub could not remove the previous status label.' });
+          }
+          if (p.note) {
+            const comment = await fetch(`${apiRoot}/issues/${p.number}/comments`, { method: 'POST', headers: { ...ghHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ body: `Maintainer status: ${p.status}\n\n${p.note}` }) });
+            if (!comment.ok) return json(res, 502, { error: 'The status label was applied, but GitHub could not add the review note.' });
+          }
+          const updatedIssue = await fetch(`${apiRoot}/issues/${p.number}`, { method: 'PATCH', headers: { ...ghHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ state: p.status === 'resolved' ? 'closed' : 'open' }) });
+          if (!updatedIssue.ok) return json(res, 502, { error: 'The status label was applied, but GitHub could not update the report state.' });
+          return json(res, 200, { ok: true });
+        } catch {
+          return json(res, 502, { error: statusLabelApplied ? 'The status label was applied, but a follow-up GitHub operation failed.' : 'GitHub could not update the report status.' });
         }
-        const result = await fetch(`https://api.github.com/repos/rnzcrt/sakay-angeles/issues/${p.number}/labels`, { method: 'POST', headers: { ...ghHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ labels: [label] }) });
-        if (!result.ok) return json(res, 502, { error: 'GitHub could not update the report label.' });
-        if (p.note) await fetch(`https://api.github.com/repos/rnzcrt/sakay-angeles/issues/${p.number}/comments`, { method: 'POST', headers: { ...ghHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ body: `Maintainer status: ${p.status}\n\n${String(p.note).slice(0, 2000)}` }) });
-        await fetch(`https://api.github.com/repos/rnzcrt/sakay-angeles/issues/${p.number}`, { method: 'PATCH', headers: { ...ghHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ state: p.status === 'resolved' ? 'closed' : 'open' }) });
-        return json(res, 200, { ok: true });
       }
       return json(res, 404, { error: 'Unknown admin endpoint.' });
     }
-    if (req.method === 'GET' && pathname.startsWith('/data/')) {
-      const name = path.basename(pathname);
-      if (!['routes.json', 'stops.json', 'routes.geojson'].includes(name)) return json(res, 404, { error: 'Not found.' });
-      res.writeHead(200, { 'Content-Type': name.endsWith('.geojson') || name.endsWith('.json') ? 'application/json; charset=utf-8' : 'text/plain', 'Cache-Control': 'no-cache' }); return res.end(await readFile(path.join(DATA, name)));
+    if (req.method === 'GET' && pathname === '/api/routes') {
+      const data = await readData();
+      return json(res, 200, {
+        meta: {
+          ...(typeof data.routesFile.source === 'string' ? { source: data.routesFile.source } : {}),
+          ...(typeof data.routesFile.dataStatus === 'string' ? { dataStatus: data.routesFile.dataStatus } : {}),
+        },
+        stops: data.stops.filter((stop) => stop && typeof stop === 'object' && !Array.isArray(stop)).map((stop) => {
+          const result = publicRecord(stop, PUBLIC_STOP_FIELDS);
+          const coordinates = publicCoordinates(stop.coordinates);
+          if (coordinates?.length === 2 && coordinates.every((n) => typeof n === 'number')) result.coordinates = coordinates;
+          return result;
+        }),
+        transfers: data.transfers.map((transfer) => publicRecord(transfer, PUBLIC_TRANSFER_FIELDS)),
+        routes: data.routes.filter((route) => route && typeof route === 'object' && !Array.isArray(route)).map((route) => ({
+          ...publicRoute(route),
+          verifiedTerminals: data.stops.filter((stop) => stop.routeId === route.id && stop.kind === 'terminal' && stop.verificationStatus === 'verified').map((stop) => publicRecord(stop, PUBLIC_STOP_FIELDS)),
+        })),
+        geojson: {
+          type: data.geojson.type,
+          features: data.geojson.features.map((feature) => ({
+            type: feature.type,
+            properties: publicRecord(feature.properties, PUBLIC_GEOMETRY_FIELDS),
+            geometry: publicGeometry(feature.geometry),
+          })),
+        },
+      });
     }
+    if (req.method === 'GET' && pathname.startsWith('/data/')) return json(res, 404, { error: 'Not found.' });
     if (pathname === '/admin' || pathname === '/admin/' || pathname === '/admin/routes') { res.writeHead(302, { Location: '/admin.html', 'Cache-Control': 'no-store' }); return res.end(); }
     if (pathname === '/trace.html') {
       if (!sessionFor(req)) return json(res, 401, { error: 'Administrator sign-in required.' });

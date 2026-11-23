@@ -7,26 +7,12 @@ async function getJson(url, fetchImpl) {
 }
 
 /**
- * Loads static data files. `baseUrl` must end with "/" (Vite's BASE_URL does).
+ * Loads the public route dataset from the Node server. `baseUrl` must end with "/" (Vite's BASE_URL does).
  * @returns {Promise<{ok:true,data:object,validation:object}|{ok:false,message:string,errors:Array}>}
  */
 export async function loadData(baseUrl = './', fetchImpl = fetch) {
   try {
-    const [routesFile, stopsFile, geojson] = await Promise.all([
-      getJson(`${baseUrl}data/routes.json`, fetchImpl),
-      getJson(`${baseUrl}data/stops.json`, fetchImpl),
-      getJson(`${baseUrl}data/routes.geojson`, fetchImpl),
-    ]);
-    const data = {
-      meta: { source: routesFile.source, dataStatus: routesFile.dataStatus },
-      stops: stopsFile.stops,
-      transfers: stopsFile.transfers ?? [],
-      routes: routesFile.routes.map((route) => ({
-        ...route,
-        verifiedTerminals: stopsFile.stops.filter((stop) => stop.routeId === route.id && stop.kind === 'terminal' && stop.verificationStatus === 'verified'),
-      })),
-      geojson,
-    };
+    const data = await getJson(`${baseUrl}api/routes`, fetchImpl);
     const validation = validateDataset(data);
     if (!validation.valid) {
       return { ok: false, message: 'Route data failed validation.', errors: validation.errors };

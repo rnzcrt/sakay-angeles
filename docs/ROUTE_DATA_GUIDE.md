@@ -12,7 +12,9 @@ The reference images are pictures, not geographic data. Pixel positions on the s
 | `public/data/stops.json` | Stops (`stops`) and verified walking links (`transfers`). |
 | `public/data/routes.geojson` | Line geometry, one feature per route direction. |
 
-Current state: all 11 routes have traced geometry. The A/B terminal endpoints (and any distinct endpoint on the return trace) are recorded as verified stops based on the project owner's real-world observations. Intermediate boarding/alighting stops, complete direction stop sequences, and transfers are not yet verified, so the app uses draft route matching for trip suggestions.
+At runtime, the three files are stored together at the root of the configured branch in the private `sakay-angeles-data` GitHub repository. `public/data` is the local source for validation and the explicit first-time migration only. The Node server reads the private branch, exposes public route fields through `/api/routes`, and writes all three files in one Git Data API commit. It does not use local files as a fallback.
+
+Current state: all 11 routes from the supplied legend have traced geometry. A twelfth, project-owner-provided Angeles City – San Fernando City route is ready for tracing but has no geometry, directions, or stops yet. The A/B terminal endpoints for the 11 traced routes (and any distinct endpoint on the return trace) are recorded as verified stops based on the project owner's real-world observations. Intermediate boarding/alighting stops, complete direction stop sequences, and transfers are not yet verified, so the app uses draft route matching for trip suggestions.
 
 ## Schemas
 
@@ -27,6 +29,8 @@ Current state: all 11 routes have traced geometry. The A/B terminal endpoints (a
   "displayColor": "#16834A",
   "fareClass": null,
   "geometryStatus": "unverified",
+  "tracingStatus": "ready-for-tracing",
+  "vehicleType": "Traditional Philippine jeepney",
   "description": "Legend text, if any",
   "sourceLandmarks": ["as listed on legend"],
   "labelNotes": ["ambiguities to verify"],
@@ -46,6 +50,9 @@ Current state: all 11 routes have traced geometry. The A/B terminal endpoints (a
 - `displayColor` is a *map display color* chosen for visibility, not an official paint spec.
 - `fareClass` may be `traditional` or `modern` only when the vehicle class is verified for that route; leave it `null` or omit it when unknown. Unknown classes intentionally produce no fare quote.
 - `geometryStatus` / `verificationStatus` ∈ `unverified | partially-verified | verified`.
+- `tracingStatus: "ready-for-tracing"` may identify a metadata-only draft with no geometry or stops. Keep `geometryStatus` unverified and `directions` empty until manual tracing and verification; do not add placeholder coordinates.
+- `vehicleType` may record a project-provided vehicle description. Do not assign a `fareClass` or fare evidence unless that fare classification is independently supported.
+- `requestedDirection` may retain an owner-requested tracing direction, clearly distinct from a verified `directions` entry.
 - Model each direction separately when the stop order or road differs by direction.
 
 **Stop** (`stops.json → stops[]`): `{ "id", "name", "coordinates": [lng, lat], "verificationStatus", "notes?" }`. The current verified stops are route terminal endpoints A/B, based on the project owner's real-world observations. Intermediate boarding/alighting points still need to be recorded before building fully verified direction sequences.
@@ -84,7 +91,7 @@ The Angeles City traffic-code copy available online lists city route/color categ
 
 ## Current audit snapshot
 
-Run `npm run audit:routes` for per-route line counts, approximate stored geometry length, terminals, ordered directions, and fare-class evidence. Length is a geometry statistic, not a measure of verified route distance. Current data has 11 digitized route records, 0 verified directions, 0 intermediate stops, and 0 assigned route fare classes. The observed A/B terminals have source labels but their observation dates are not recorded. No new route or fare class has been promoted based on web search.
+Run `npm run audit:routes` for per-route line counts, approximate stored geometry length, terminals, ordered directions, and fare-class evidence. Length is a geometry statistic, not a measure of verified route distance. Current data has 11 digitized route records plus one geometry-free route ready for tracing, 0 verified directions, 0 intermediate stops, and 0 assigned route fare classes. The observed A/B terminals have source labels but their observation dates are not recorded. No new route or fare class has been promoted based on web search.
 
 ## A direction is used by the planner only if all of these hold
 
@@ -95,7 +102,7 @@ Run `npm run audit:routes` for per-route line counts, approximate stored geometr
 
 ## Planner rules
 
-See the README section “How the planner works”. In short: ordered directions only, transfers only at the same verified stop id or a verified transfer record, walking access limit 500 m and up to 10 transfers for the current 11-route data (configurable in `src/config.js`), no invented ETAs.
+See the README section “How the planner works”. In short: ordered directions only, transfers only at the same verified stop id or a verified transfer record, walking access limit 500 m and up to 10 transfers for the current 12-route data (configurable in `src/config.js`), no invented ETAs.
 
 ## Known gaps in the source material
 

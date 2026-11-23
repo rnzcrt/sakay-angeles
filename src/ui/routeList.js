@@ -11,7 +11,8 @@ const swatch = (route) =>
   `<span class="route-swatch" style="background:${escapeHtml(route.displayColor)}" aria-hidden="true"></span>`;
 
 export function renderRouteItem(route, { selected = false, visible = true, hasGeometry = false } = {}) {
-  const status = hasGeometry ? 'Community testing · based on observation' : 'Needs a route line';
+  const status = hasGeometry ? 'Community testing · based on observation'
+    : route.tracingStatus === 'ready-for-tracing' ? 'Ready for tracing' : 'Needs a route line';
   return `<li class="route-item${selected ? ' is-selected' : ''}">
   <label class="route-toggle"><input type="checkbox" data-route-toggle="${escapeHtml(route.id)}" ${visible ? 'checked' : ''} ${hasGeometry ? '' : 'disabled'}>
     <span class="visually-hidden">Show ${escapeHtml(route.name)} on the map${hasGeometry ? '' : ' (no line available yet)'}</span></label>
@@ -28,10 +29,14 @@ export function renderRouteDetail(route, { hasGeometry = false } = {}) {
   const routeIds = escapeHtml(route.id);
   const routeNames = escapeHtml(`${route.jeepneyColorName} · ${route.name}`);
   const terminals = (route.verifiedTerminals ?? []).map((stop) => `<li>${escapeHtml(stop.terminalLabel)}: ${escapeHtml(stop.name)} <small>(based on observation)</small></li>`).join('');
+  const vehicle = route.vehicleType ? `<dt>Vehicle</dt><dd>${escapeHtml(route.vehicleType)}</dd>` : '';
+  const direction = route.requestedDirection ? `<dt>Requested direction</dt><dd>${escapeHtml(route.requestedDirection)}</dd>` : '';
   return `<article class="card" aria-labelledby="route-detail-title">
   <h3 id="route-detail-title" class="detail-title">${swatch(route)} ${escapeHtml(route.name)}</h3>
   <dl class="detail-grid">
     <dt>Jeepney color</dt><dd>${escapeHtml(route.jeepneyColorName)}</dd>
+    ${vehicle}
+    ${direction}
     <dt>Places on the map</dt><dd>${landmarks || 'Route details are still being added'} <small>These places do not confirm every stop or direction.</small></dd>
     <dt>Terminals</dt><dd>${terminals ? `<ul class="detail-notes">${terminals}</ul>` : 'Still being checked'}</dd>
     <dt>Route details</dt><dd>${hasGeometry ? 'Based on observation · needs community confirmation' : 'Needs confirmation'}</dd>

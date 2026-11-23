@@ -16,7 +16,7 @@ Run automated tests with `npm test` (Node built-in runner, no extra dependencies
 | 8 | Broken refs, bad coordinates, duplicate ids, malformed GeoJSON | `validate.test.js`, planner `data_error` |
 | 9 | Route name/color rendered from metadata; no hard-coded duplicates in `src/ui`, `src/routing`, `src/map` | `ui.test.js` |
 | 10 | Geolocation denied/timeout/unsupported/insecure; geocoding network/HTTP/timeout errors, caching, throttling | `services.test.js` |
-| – | Transfer limit; ranking and de-duplication; shipped data has all 11 routes and stays unverified | planner, `data.test.js` |
+| – | Transfer limit; ranking and de-duplication; shipped data has 12 routes, including a geometry-free draft, and keeps route geometry unverified | planner, `data.test.js` |
 
 Also run `npm run validate:data` and `npm run build`.
 
@@ -26,7 +26,7 @@ Test at 360, 390, 768, 1024 px and a wide desktop; Chrome/Edge, Firefox and Safa
 
 ### Map and routes
 - [ ] Map loads; attribution visible; legend explains solid = verified, dashed = draft.
-- [ ] All 11 routes appear in the list with name and color **text**.
+- [ ] All 12 routes appear in the list with name and color **text**; the Angeles–San Fernando draft says “Ready for tracing” and draws no line.
 - [ ] Selecting a route shows its detail card (color label, source label, landmarks, verification state, items to verify). Routes without geometry say so; nothing is drawn for them.
 - [ ] Show all / Hide all / Fit routes work (Fit says there is nothing to fit when no lines exist). Toggling a checkbox never selects a route and vice versa.
 - [ ] **Original bug check:** no angular lines cut across neighborhoods; with the shipped data no route lines are drawn at all.
@@ -50,7 +50,7 @@ Test at 360, 390, 768, 1024 px and a wide desktop; Chrome/Edge, Firefox and Safa
 - [ ] Clicking the map with no route selected shows a hint, not a point.
 - [ ] Select a route, click 4+ points: dashed line and numbered-length stats update; points can be dragged; double-click deletes without adding a new point.
 - [ ] Undo / Clear / Reverse work; reload the page and the drafts are still there.
-- [ ] Export downloads `routes.geojson`; after replacing `public/data/routes.geojson` the main app draws the line dashed and still says "No verified route yet" for trips.
+- [ ] Saving traced geometry creates a GitHub data revision; after refresh the public API returns the new dashed line while trips still say "No verified route yet".
 - [ ] Import of a previously exported file restores the lines.
 - [ ] Optional terminal names survive export/import.
 - [ ] Snap to roads follows streets and respects one-way streets; with networking blocked it falls back to a straight line with a message.

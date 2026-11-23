@@ -554,6 +554,24 @@
           ]
         }
       ]
+    },
+    {
+      "id": "angeles-san-fernando",
+      "name": "Angeles City – San Fernando City",
+      "sourceLabel": "PROJECT-OWNER-PROVIDED DRAFT",
+      "sourceSubLabel": "Angeles City to San Fernando City",
+      "requestedDirection": "Angeles City to San Fernando City",
+      "jeepneyColorName": "Silver",
+      "displayColor": "#A8A9AD",
+      "vehicleType": "Traditional Philippine jeepney",
+      "geometryStatus": "unverified",
+      "tracingStatus": "ready-for-tracing",
+      "description": "Project-owner-provided draft direction. Geometry and stops await manual tracing and verification.",
+      "sourceLandmarks": [],
+      "labelNotes": [],
+      "source": "project-owner-provided route request",
+      "directions": [],
+      "secondarySources": []
     }
   ],
   "unmatchedSecondaryRoutes": [

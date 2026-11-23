@@ -4,6 +4,14 @@ import { defineConfig } from 'vite';
 // sub-path (for example https://<user>.github.io/<repo>/).
 export default defineConfig({
   base: './',
+  server: {
+    proxy: {
+      '/api': 'http://localhost:4173',
+      '/auth': 'http://localhost:4173',
+      '/admin': 'http://localhost:4173',
+      '/trace.html': 'http://localhost:4173',
+    },
+  },
   // maplibre-gl 6 loads its web worker via import.meta.url. Pre-bundling it in
   // dev breaks that URL ("504 Outdated Optimize Dep", "Worker failed to load").
   optimizeDeps: { exclude: ['maplibre-gl'] },

@@ -2,12 +2,30 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { validateDataset } from '../src/data/validate.js';
+import { loadData } from '../src/data/loadData.js';
 import { planTrip, buildGraph, PLAN_STATUS } from '../src/routing/planner.js';
 
 const read = (f) => JSON.parse(readFileSync(new URL(`../public/data/${f}`, import.meta.url), 'utf8'));
 const routesFile = read('routes.json');
 const stopsFile = read('stops.json');
 const dataset = { routes: routesFile.routes, stops: stopsFile.stops, transfers: stopsFile.transfers, geojson: read('routes.geojson') };
+
+test('public data loader requests only the server route API and validates its response', async () => {
+  const publicData = {
+    meta: { source: routesFile.source, dataStatus: routesFile.dataStatus },
+    routes: routesFile.routes.map((route) => ({ ...route, verifiedTerminals: [] })),
+    stops: stopsFile.stops,
+    transfers: stopsFile.transfers ?? [],
+    geojson: dataset.geojson,
+  };
+  let requested;
+  const result = await loadData('/base/', async (url) => {
+    requested = url;
+    return Response.json(publicData);
+  });
+  assert.equal(requested, '/base/api/routes');
+  assert.equal(result.ok, true);
+});
 
 test('shipped data validates', () => {
   const r = validateDataset(dataset);
@@ -20,7 +38,7 @@ test('updated traces keep all route directions and their verified terminal links
   const stops = new Map(dataset.stops.map((stop) => [stop.id, stop]));
   const directionIds = dataset.geojson.features.map((feature) => feature.properties.directionId);
   assert.equal(new Set(directionIds).size, directionIds.length);
-  assert.deepEqual(new Set(dataset.geojson.features.map((feature) => feature.properties.routeId)), new Set(routes.keys()));
+  assert.deepEqual(new Set(dataset.geojson.features.map((feature) => feature.properties.routeId)), new Set([...routes.keys()].filter((id) => id !== 'angeles-san-fernando')));
   for (const feature of dataset.geojson.features) {
     const p = feature.properties;
     const route = routes.get(p.routeId);
@@ -38,14 +56,30 @@ test('updated traces keep all route directions and their verified terminal links
   }
 });
 
-test('all 11 legend routes exist with source labels and color names', () => {
-  assert.equal(routesFile.routes.length, 11);
-  const colors = routesFile.routes.map((r) => r.jeepneyColorName).sort();
+test('all 11 legend routes remain alongside the geometry-free owner draft', () => {
+  const legendRoutes = routesFile.routes.filter((r) => r.source === 'route-legend.jpeg');
+  assert.equal(routesFile.routes.length, 12);
+  assert.equal(legendRoutes.length, 11);
+  const colors = legendRoutes.map((r) => r.jeepneyColorName).sort();
   assert.deepEqual(colors, ['Blue', 'Green', 'Grey', 'Lavender', 'Maroon', 'Orange', 'Pink', 'Sand', 'Steel', 'White', 'Yellow']);
-  for (const r of routesFile.routes) {
+  for (const r of legendRoutes) {
     assert.ok(r.sourceLabel && r.name && /^#[0-9A-Fa-f]{6}$/.test(r.displayColor), r.id);
     assert.equal(r.geometryStatus, 'unverified', `${r.id} must stay unverified until digitized`);
   }
+});
+
+test('Angeles–San Fernando silver draft is traceable metadata only', () => {
+  const route = routesFile.routes.find((r) => r.id === 'angeles-san-fernando');
+  assert.ok(route);
+  assert.equal(route.name, 'Angeles City – San Fernando City');
+  assert.equal(route.jeepneyColorName, 'Silver');
+  assert.equal(route.vehicleType, 'Traditional Philippine jeepney');
+  assert.equal(route.requestedDirection, 'Angeles City to San Fernando City');
+  assert.equal(route.geometryStatus, 'unverified');
+  assert.equal(route.tracingStatus, 'ready-for-tracing');
+  assert.deepEqual(route.directions, []);
+  assert.equal(stopsFile.stops.some((stop) => stop.routeId === route.id), false);
+  assert.equal(dataset.geojson.features.some((feature) => feature.properties.routeId === route.id), false);
 });
 
 test('legend spellings are preserved, not silently corrected', () => {
@@ -63,7 +97,7 @@ test('shipped data produces no_verified_route and never a made-up itinerary', ()
 
 test('blog-derived notes are attached as unverified secondary sources and never alter legend labels', () => {
   assert.ok(routesFile.secondarySourceWarning);
-  for (const r of routesFile.routes) {
+  for (const r of routesFile.routes.filter((route) => route.source === 'route-legend.jpeg')) {
     assert.equal(r.secondarySources.length, 1, r.id);
     assert.equal(r.secondarySources[0].status, 'unverified');
     assert.ok(r.secondarySources[0].conflictsWithLegend.length > 0, r.id);

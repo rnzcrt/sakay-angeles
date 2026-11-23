@@ -22,7 +22,7 @@ Requires Node.js `^20.19` or `>=22.12` and npm.
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173
+npm run dev        # http://localhost:5173 (requires the configured Node API server)
 npm test           # planner, validation, UI renderers, services
 npm run validate:data
 npm run build      # outputs dist/
@@ -43,7 +43,26 @@ SESSION_SECRET="set-in-your-deployment-environment"
 ADMIN_GITHUB_USERS="rnzcrt"
 ```
 
-The allowlist is checked on every OAuth login; credentials and OAuth tokens stay on the server. Admin sessions use HttpOnly, SameSite cookies and expire after 12 hours. Use a random `SESSION_SECRET` with at least 32 bytes. If OAuth is not configured, admin access remains disabled. Run this app on a Node host with a persistent writable disk; optional `ROUTE_DATA_DIR` and `ROUTE_HISTORY_DIR` can point to persistent storage. Back up both directories.
+The allowlist is checked on every OAuth login; credentials and OAuth tokens stay on the server. Admin sessions use HttpOnly, SameSite cookies and expire after 12 hours. Use a random `SESSION_SECRET` with at least 32 bytes. If OAuth is not configured, admin access remains disabled.
+
+Route data and revision history live in the separate private `sakay-angeles-data` GitHub repository. Configure a fine-grained GitHub token with Contents read/write access only to that repository, plus these server environment variables:
+
+```text
+SAKAY_DATA_GITHUB_TOKEN="set-in-your-deployment-environment"
+SAKAY_DATA_GITHUB_OWNER="repository-owner"
+SAKAY_DATA_GITHUB_REPO="sakay-angeles-data"
+SAKAY_DATA_GITHUB_BRANCH="main"
+```
+
+For local preflight and migration preview, put these four settings in the repository-root `.env` file using the same variable names and your own GitHub values. `.env` and `.env.*` are ignored by Git. The CLI commands load `.env` with Node's built-in environment-file support (Node 20.19+); variables already supplied by the shell take precedence. Do not commit or share the file. The migration preview and preflight remain read-only.
+
+The token is used only by the Node server. The public website reads validated data through `/api/routes`; route edits and restores create single Git commits containing all three data files and an audit record. Writes compare the loaded branch commit SHA and reject stale edits. The server keeps a short in-memory cache and reloads the branch after restart. Local `public/data` files remain the reviewed migration and validation input; runtime reads and writes do not fall back to them.
+
+For local development, build and start the Node server in one terminal (`npm run build && npm start`), then run `npm run dev` in another. The Vite API proxy forwards data and admin requests to the Node server.
+
+Before migration or deployment, configure the four storage settings and run `npm run data:preflight`. This read-only command verifies GitHub authentication, the private repository, configured branch, and readability of all three route-data files; it reports status and commit SHA without showing private file contents or credentials. The Node server does not run this check during startup, so a GitHub outage does not prevent the server from starting. Route API requests still fail safely when remote data cannot be read, with no local-file fallback.
+
+For first migration, run `npm run migrate:data:preview`. Its read-only report identifies the configured owner, repository, branch, current target branch SHA when available, repository/branch access, route-file presence, and whether the result would create files, make no changes, or be blocked. Review the target and validation report, then run `npm run migrate:data:apply` only when the configured private branch has no conflicting route dataset. The apply command creates a recoverable local backup under `.route-data-backups/` before committing. An exact repeat is a no-op; differing remote route data is never overwritten.
 
 The application applies per-process rate limits to OAuth and admin writes. If running multiple instances, use a shared rate-limit store or an edge rate limit; the built-in limits do not coordinate between instances. Rate-limit keys use the direct socket address; forwarded client-IP headers are not trusted because the deployment's proxy-header chain has not been verified. `TRUST_PROXY_CLIENT_IP` is not supported.
 
@@ -60,7 +79,7 @@ Credential hygiene: older README revisions in the repository history contained c
 - **Snap to roads** (on by default) routes between your clicks with the public OSRM demo server, which follows one-way streets from OpenStreetMap. It is for light use only; if it is unreachable the tracer falls back to a straight line and tells you. Change the provider in `ROUTING_CONFIG` (`src/config.js`). Clicks made while snapping is still working are queued, never dropped. **Detour guard:** if snapping would take a long way round (for example one-way or unconnected streets) the piece is drawn straight instead and you are told; **hold Option/Alt while clicking** to add a straight piece on purpose; an existing line with detours shows a warning and a **Straighten the detours** button.
 - Drag a point to move it, double-click to delete. **Click a point to select it, then *Cut after the selected point*** to throw away everything after it and keep tracing from there.
 - Terminal names are optional. Route metadata and stops can be managed from the private dashboard.
-- Review the dashed geometry in the tracer preview, complete the required change record, then publish. The server validates and saves the route files and a full pre-change snapshot. The public guide reads the saved files. Editing geometry or directions keeps them unverified; feedback never changes routes by itself.
+- Review the dashed geometry in the tracer preview, complete the required change record, then publish. The server validates and commits the complete route dataset with an audit record. Git history provides revisions and restore creates a new commit; editing geometry or directions keeps them unverified. Feedback never changes routes by itself.
 In the app, each part is ridden only in its traced order. When Route 1 and Route 2 join up (Route 1 ends where Route 2 starts and Route 2 ends where Route 1 starts) they are treated as one jeepney going round, so you can stay on board across the turnaround. Add `?offline` to either page for a blank basemap (testing).
 
 ## Switching the trip
@@ -79,9 +98,10 @@ Results are labelled *draft*. Terminal locations are shown as verified; boarding
 ## Repository layout
 ```text
 index.html                Vite entry
-public/data/              routes.json · stops.json · routes.geojson (static data)
+public/data/              local migration/validation input (not runtime storage)
 src/main.js               app wiring
-server.js                 GitHub OAuth, admin authorization, route API and revision storage
+server.js                 GitHub OAuth, admin authorization, public/admin data APIs
+src/security/             rate limits · private GitHub data storage
 admin.html · src/admin.js private route dashboard, stops, feedback and history
 src/config.js             map style, service area, planner and geocoder settings
 src/data/                 validate.js (schema checks) · loadData.js
@@ -108,7 +128,7 @@ Source labels are preserved as printed (e.g. “SAPANG BATO - ANGLES”, “PAND
 - nodes are stops; ride edges join consecutive stops of one *directional* route variant (nothing is assumed two-way);
 - a transfer exists only at the **same verified stop id** or via an explicit verified `transfers` record — never from proximity or similar landmark names;
 - your start/end snap to boarding/alighting stops within 500 m straight-line (configurable); a stop that cannot be boarded/alighted in the needed direction does not count;
-- depth-first search up to 10 transfers for this 11-route dataset, de-duplicated, ranked by total estimated time and then walking/transfer count;
+- depth-first search up to 10 transfers for this 12-route dataset, de-duplicated, ranked by total estimated time and then walking/transfer count;
 - outcomes: `success`, `no_verified_route`, `origin_too_far_from_stop`, `destination_too_far_from_stop`, `invalid_input`, `data_error`.
 
 Distances are straight-line estimates. No travel times are produced.
@@ -120,7 +140,7 @@ Location is requested only after you press *Use my location* and is used in your
 ChatGPT assisted the project maintainer with brainstorming and planning, code development and implementation guidance, debugging and troubleshooting, UI/UX improvements, documentation and README writing, and security reviews and testing guidance. The maintainer directed the project, made the decisions, reviewed and tested suggestions and code, and chose what to integrate. ChatGPT is an AI assistant; it is not the owner or creator of Sakay Angeles. See [`chatgpt.md`](chatgpt.md) for fuller attribution details.
 
 ## Deployment
-Deploy the repository to a Node.js host that supports environment secrets and a persistent writable disk, then run `npm ci`, `npm run build`, and `npm start`. Static hosting such as GitHub Pages cannot enforce the administrator boundary or persist route edits, so the GitHub workflow only validates and builds. Set `BASE_URL` to the public HTTPS origin and configure the OAuth variables above before enabling route management.
+Deploy the repository to a Node.js host that supports environment secrets, then run `npm ci`, `npm run build`, and `npm start`. Static hosting such as GitHub Pages cannot enforce the administrator boundary or serve the private-repository-backed APIs, so the GitHub workflow only validates and builds. Set `BASE_URL` to the public HTTPS origin, configure the OAuth variables and the four private data repository variables above, and complete the explicit data migration before enabling route management.
 
 ## Troubleshooting
 - **Blank/grey map:** check the console and network tab for `tiles.openfreemap.org`; WebGL must be enabled. The page shows a banner or fallback and stays usable.

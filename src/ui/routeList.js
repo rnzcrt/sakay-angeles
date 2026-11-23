@@ -3,16 +3,35 @@
 
 import { escapeHtml } from './html.js';
 
+export const ROUTE_LIST_PREFERENCE_KEY = 'sakay-angeles-public-route-list-preference-v1';
+
 export function routeHasGeometry(route, geojson) {
   return (geojson?.features ?? []).some((f) => f.properties?.routeId === route.id);
 }
 
-export function toggleRouteList(list, button) {
+function setRouteListExpanded(list, button, expanded) {
+  list.hidden = !expanded;
+  button.textContent = expanded ? 'Collapse routes' : 'Expand routes';
+  button.setAttribute('aria-expanded', String(expanded));
+}
+
+export function initializeRouteList(list, button, storage) {
+  let preference = 'expanded';
+  try {
+    const saved = storage?.getItem(ROUTE_LIST_PREFERENCE_KEY);
+    if (saved === 'collapsed' || saved === 'expanded') preference = saved;
+  } catch { /* the route list remains usable when browser storage is blocked */ }
+  const expanded = preference === 'expanded';
+  setRouteListExpanded(list, button, expanded);
+  return expanded;
+}
+
+export function toggleRouteList(list, button, storage) {
   const expanded = button.getAttribute('aria-expanded') === 'true';
   const nextExpanded = !expanded;
-  list.hidden = !nextExpanded;
-  button.textContent = nextExpanded ? 'Collapse routes' : 'Expand routes';
-  button.setAttribute('aria-expanded', String(nextExpanded));
+  setRouteListExpanded(list, button, nextExpanded);
+  try { storage?.setItem(ROUTE_LIST_PREFERENCE_KEY, nextExpanded ? 'expanded' : 'collapsed'); }
+  catch { /* the current-page toggle works even when browser storage is blocked */ }
   return nextExpanded;
 }
 

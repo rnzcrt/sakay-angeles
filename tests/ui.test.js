@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { renderRouteItem, renderRouteDetail, routeHasGeometry, toggleRouteList } from '../src/ui/routeList.js';
+import { renderRouteItem, renderRouteDetail, routeHasGeometry, ROUTE_LIST_PREFERENCE_KEY, initializeRouteList, toggleRouteList } from '../src/ui/routeList.js';
 import { renderPlanResult, renderGeocodeChoices } from '../src/ui/tripResults.js';
 import { planTrip, PLAN_STATUS } from '../src/routing/planner.js';
 import { makeData, near, stopOf } from './fixtures.js';
 
 const real = JSON.parse(readFileSync(new URL('../public/data/routes.json', import.meta.url), 'utf8')).routes;
 
-test('route list collapse toggles only the list and keeps its state separate from route visibility', () => {
+function routeListControls() {
   const list = { hidden: false };
   const button = {
     label: 'Collapse routes', expanded: 'true',
@@ -17,20 +17,95 @@ test('route list collapse toggles only the list and keeps its state separate fro
     get textContent() { return this.label; },
     set textContent(value) { this.label = value; },
   };
-  const visible = new Set(['route-a', 'route-b']);
+  return { list, button };
+}
+
+function memoryStorage(initial = {}) {
+  const values = new Map(Object.entries(initial));
+  return {
+    getItem(key) { return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { values.set(key, value); },
+    dump(key) { return values.get(key); },
+  };
+}
+
+test('route list preference defaults to expanded for first-time visitors', () => {
+  const { list, button } = routeListControls();
+  const visible = new Set(['route-a']);
   const originalVisibility = new Set(visible);
 
-  assert.equal(toggleRouteList(list, button), false);
-  assert.equal(list.hidden, true);
-  assert.equal(button.textContent, 'Expand routes');
-  assert.equal(button.getAttribute('aria-expanded'), 'false');
-  assert.deepEqual(visible, originalVisibility);
-
-  assert.equal(toggleRouteList(list, button), true);
+  assert.equal(initializeRouteList(list, button, memoryStorage()), true);
   assert.equal(list.hidden, false);
   assert.equal(button.textContent, 'Collapse routes');
   assert.equal(button.getAttribute('aria-expanded'), 'true');
   assert.deepEqual(visible, originalVisibility);
+});
+
+test('route list preference restores collapsed and expanded states', () => {
+  const visible = new Set(['route-a', 'route-b']);
+  const originalVisibility = new Set(visible);
+  const collapsed = routeListControls();
+  assert.equal(initializeRouteList(collapsed.list, collapsed.button, memoryStorage({ [ROUTE_LIST_PREFERENCE_KEY]: 'collapsed' })), false);
+  assert.equal(collapsed.list.hidden, true);
+  assert.equal(collapsed.button.textContent, 'Expand routes');
+  assert.equal(collapsed.button.getAttribute('aria-expanded'), 'false');
+
+  const expanded = routeListControls();
+  assert.equal(initializeRouteList(expanded.list, expanded.button, memoryStorage({ [ROUTE_LIST_PREFERENCE_KEY]: 'expanded' })), true);
+  assert.equal(expanded.list.hidden, false);
+  assert.equal(expanded.button.textContent, 'Collapse routes');
+  assert.equal(expanded.button.getAttribute('aria-expanded'), 'true');
+  assert.deepEqual(visible, originalVisibility);
+});
+
+test('invalid route-list preference defaults to expanded', () => {
+  const { list, button } = routeListControls();
+  assert.equal(initializeRouteList(list, button, memoryStorage({ [ROUTE_LIST_PREFERENCE_KEY]: 'sometimes' })), true);
+  assert.equal(list.hidden, false);
+  assert.equal(button.textContent, 'Collapse routes');
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+});
+
+test('unavailable and throwing storage reads do not break route-list initialization', () => {
+  const unavailable = routeListControls();
+  assert.equal(initializeRouteList(unavailable.list, unavailable.button, null), true);
+  assert.equal(unavailable.list.hidden, false);
+
+  const throwing = routeListControls();
+  assert.equal(initializeRouteList(throwing.list, throwing.button, { getItem() { throw new Error('blocked'); } }), true);
+  assert.equal(throwing.button.textContent, 'Collapse routes');
+  assert.equal(throwing.button.getAttribute('aria-expanded'), 'true');
+});
+
+test('route-list toggles update labels and preference without changing route visibility', () => {
+  const { list, button } = routeListControls();
+  const visible = new Set(['route-a', 'route-b']);
+  const originalVisibility = new Set(visible);
+  const storage = memoryStorage();
+
+  assert.equal(toggleRouteList(list, button, storage), false);
+  assert.equal(list.hidden, true);
+  assert.equal(button.textContent, 'Expand routes');
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
+  assert.equal(storage.dump(ROUTE_LIST_PREFERENCE_KEY), 'collapsed');
+  assert.deepEqual(visible, originalVisibility);
+
+  assert.equal(toggleRouteList(list, button, storage), true);
+  assert.equal(list.hidden, false);
+  assert.equal(button.textContent, 'Collapse routes');
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  assert.equal(storage.dump(ROUTE_LIST_PREFERENCE_KEY), 'expanded');
+  assert.deepEqual(visible, originalVisibility);
+});
+
+test('throwing storage writes do not prevent the current-page route-list toggle', () => {
+  const { list, button } = routeListControls();
+  initializeRouteList(list, button, null);
+  const storage = { setItem() { throw new Error('blocked'); } };
+  assert.equal(toggleRouteList(list, button, storage), false);
+  assert.equal(list.hidden, true);
+  assert.equal(button.textContent, 'Expand routes');
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
 });
 
 test('public route toolbar removes Fit Routes and retains map visibility controls', () => {
@@ -41,6 +116,12 @@ test('public route toolbar removes Fit Routes and retains map visibility control
   assert.match(source, /\$\('show-all-btn'\)\.onclick = \(\) => \{ state\.visible = new Set\(routesWithGeometry\(\)\.map/);
   assert.match(source, /\$\('hide-all-btn'\)\.onclick = \(\) => \{ state\.visible = new Set\(\);/);
   assert.match(source, /const id = e\.target\.dataset\?\.routeToggle;[\s\S]*?state\.visible\.add\(id\); else state\.visible\.delete\(id\);/);
+  const storageInitialization = source.indexOf('try { state.storage = window.localStorage;');
+  const preferenceInitialization = source.indexOf('initializeRouteList($(\'route-list\'), $(\'route-list-toggle-btn\'), state.storage);');
+  const firstRouteRender = source.indexOf('renderDataBanner(); renderLegend(); renderRouteList(); bindEvents();');
+  assert.ok(storageInitialization >= 0 && storageInitialization < preferenceInitialization && preferenceInitialization < firstRouteRender,
+    'saved preference is applied after storage setup and before the first route render');
+  assert.match(source, /toggleRouteList\(\$\('route-list'\), \$\('route-list-toggle-btn'\), state\.storage\)/);
   assert.match(source, /fitToRoutes/);
   assert.doesNotMatch(source, /\$\('fit-btn'\)/);
 });

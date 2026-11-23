@@ -10,7 +10,7 @@ import { searchPlaces } from './services/geocoding.js';
 import { routeWalking } from './services/walking.js';
 import { estimateItineraryFares } from './services/fares.js';
 import { findNearbyPedestrianFacilities } from './services/pedestrianFacilities.js';
-import { renderRouteItem, renderRouteDetail, routeHasGeometry, toggleRouteList } from './ui/routeList.js';
+import { renderRouteItem, renderRouteDetail, routeHasGeometry, initializeRouteList, toggleRouteList } from './ui/routeList.js';
 import { renderPlanResult, renderGeocodeChoices, renderDraftResult } from './ui/tripResults.js';
 import { buildDraftLines, planDraftTrip, DRAFT_STATUS } from './routing/draftPlanner.js';
 import { rankDraftCandidates } from './routing/draftRanking.js';
@@ -593,7 +593,7 @@ function bindEvents() {
   });
   $('show-all-btn').onclick = () => { state.visible = new Set(routesWithGeometry().map((r) => r.id)); renderRouteList(); syncMap(); notify.status('All available route lines shown.'); };
   $('hide-all-btn').onclick = () => { state.visible = new Set(); renderRouteList(); syncMap(); notify.status('All route lines hidden.'); };
-  $('route-list-toggle-btn').onclick = () => toggleRouteList($('route-list'), $('route-list-toggle-btn'));
+  $('route-list-toggle-btn').onclick = () => toggleRouteList($('route-list'), $('route-list-toggle-btn'), state.storage);
   $('clear-trip-btn').onclick = clearTrip;
   $('swap-btn').onclick = swapTrip;
   $('data-banner').addEventListener('click', (e) => {
@@ -724,6 +724,7 @@ async function start() {
     return;
   }
   try { state.storage = window.localStorage; } catch { state.storage = null; }
+  initializeRouteList($('route-list'), $('route-list-toggle-btn'), state.storage);
   state.shippedData = loaded.data;
   const merged = mergeLocalDrafts(loaded.data, state.storage, { ignoreLocal: false });
   if (merged.error && import.meta.env.DEV) notify.alert(`Your traced lines were not used: ${merged.error}`);

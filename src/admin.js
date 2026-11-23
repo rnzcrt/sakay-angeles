@@ -1,5 +1,6 @@
 import './admin.css';
 import { escapeHtml } from './ui/html.js';
+import { ensureHistoryPreviewContainer, renderSavedDataPreview, toggleSavedDataPreview } from './admin/historyPreview.js';
 
 const $ = (id) => document.getElementById(id);
 let dataset; let selectedId = null;
@@ -96,15 +97,30 @@ $('route-form').addEventListener('submit', async (e) => {
   try { gatherRouteEdits(); const result = await api('/api/admin/save', { method: 'POST', body: JSON.stringify({ data: dataset, editedRouteIds: [selectedId], expectedCommitSha: dataset.commitSha, audit: audit() }) }); announce(`Saved as revision ${result.revision.slice(0, 8)}; changed route details remain unverified.`); await loadAll(); }
   catch (err) { announce(err.message, true); }
 });
+function historyPreviewFor(revisionId) {
+  const list = $('history-list');
+  const button = [...list.querySelectorAll('[data-inspect]')].find((candidate) => candidate.dataset.inspect === revisionId);
+  const entry = button?.closest('.admin-list-item');
+  return entry ? ensureHistoryPreviewContainer(entry, revisionId) : null;
+}
 $('history-list').addEventListener('click', async (e) => {
   const inspectId = e.target.closest('[data-inspect]')?.dataset.inspect;
   if (inspectId) {
+    const initialPreview = historyPreviewFor(inspectId);
+    if (!initialPreview) { announce('This history entry is no longer available. Reload route history and try again.', true); return; }
+    if (initialPreview.querySelector('details')) { toggleSavedDataPreview(initialPreview, ''); return; }
+    const previewRouteId = selectedId;
+    initialPreview.textContent = 'Loading saved data…';
     try {
       const item = await api(`/api/admin/history/item?id=${encodeURIComponent(inspectId)}`);
-      const route = item.data.routes.find((r) => r.id === selectedId);
-      const snapshot = { route, stops: item.data.stops.filter((s) => s.routeId === selectedId), geometry: item.data.geojson.features.filter((f) => f.properties?.routeId === selectedId) };
-      $(`[data-preview="${CSS.escape(inspectId)}"]`).innerHTML = `<details open><summary>Saved ${escapeHtml(route?.name || selectedId)} data</summary><pre>${escapeHtml(JSON.stringify(snapshot, null, 2))}</pre></details>`;
-    } catch (err) { announce(err.message, true); }
+      const preview = historyPreviewFor(inspectId);
+      if (!preview) { announce('This history entry is no longer available. Reload route history and try again.', true); return; }
+      preview.innerHTML = renderSavedDataPreview(item, previewRouteId);
+    } catch (err) {
+      const preview = historyPreviewFor(inspectId);
+      if (preview) preview.textContent = err.message;
+      announce(err.message, true);
+    }
     return;
   }
   const id = e.target.closest('[data-history]')?.dataset.history; if (!id) return;

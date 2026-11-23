@@ -1,12 +1,49 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
-import { renderRouteItem, renderRouteDetail, routeHasGeometry } from '../src/ui/routeList.js';
+import { renderRouteItem, renderRouteDetail, routeHasGeometry, toggleRouteList } from '../src/ui/routeList.js';
 import { renderPlanResult, renderGeocodeChoices } from '../src/ui/tripResults.js';
 import { planTrip, PLAN_STATUS } from '../src/routing/planner.js';
 import { makeData, near, stopOf } from './fixtures.js';
 
 const real = JSON.parse(readFileSync(new URL('../public/data/routes.json', import.meta.url), 'utf8')).routes;
+
+test('route list collapse toggles only the list and keeps its state separate from route visibility', () => {
+  const list = { hidden: false };
+  const button = {
+    label: 'Collapse routes', expanded: 'true',
+    getAttribute(name) { return name === 'aria-expanded' ? this.expanded : null; },
+    setAttribute(name, value) { if (name === 'aria-expanded') this.expanded = value; },
+    get textContent() { return this.label; },
+    set textContent(value) { this.label = value; },
+  };
+  const visible = new Set(['route-a', 'route-b']);
+  const originalVisibility = new Set(visible);
+
+  assert.equal(toggleRouteList(list, button), false);
+  assert.equal(list.hidden, true);
+  assert.equal(button.textContent, 'Expand routes');
+  assert.equal(button.getAttribute('aria-expanded'), 'false');
+  assert.deepEqual(visible, originalVisibility);
+
+  assert.equal(toggleRouteList(list, button), true);
+  assert.equal(list.hidden, false);
+  assert.equal(button.textContent, 'Collapse routes');
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  assert.deepEqual(visible, originalVisibility);
+});
+
+test('public route toolbar removes Fit Routes and retains map visibility controls', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(html, /id="fit-btn"|Fit routes/i);
+  assert.match(html, /id="route-list-toggle-btn"[^>]*aria-controls="route-list"[^>]*aria-expanded="true"[^>]*>Collapse routes/);
+  assert.match(source, /\$\('show-all-btn'\)\.onclick = \(\) => \{ state\.visible = new Set\(routesWithGeometry\(\)\.map/);
+  assert.match(source, /\$\('hide-all-btn'\)\.onclick = \(\) => \{ state\.visible = new Set\(\);/);
+  assert.match(source, /const id = e\.target\.dataset\?\.routeToggle;[\s\S]*?state\.visible\.add\(id\); else state\.visible\.delete\(id\);/);
+  assert.match(source, /fitToRoutes/);
+  assert.doesNotMatch(source, /\$\('fit-btn'\)/);
+});
 
 test('9. route item renders name and color from supplied metadata', () => {
   const r = { ...real[0], name: 'Custom <Name>', jeepneyColorName: 'Teal', displayColor: '#00AAAA' };

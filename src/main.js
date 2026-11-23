@@ -10,7 +10,7 @@ import { searchPlaces } from './services/geocoding.js';
 import { routeWalking } from './services/walking.js';
 import { estimateItineraryFares } from './services/fares.js';
 import { findNearbyPedestrianFacilities } from './services/pedestrianFacilities.js';
-import { renderRouteItem, renderRouteDetail, routeHasGeometry } from './ui/routeList.js';
+import { renderRouteItem, renderRouteDetail, routeHasGeometry, toggleRouteList } from './ui/routeList.js';
 import { renderPlanResult, renderGeocodeChoices, renderDraftResult } from './ui/tripResults.js';
 import { buildDraftLines, planDraftTrip, DRAFT_STATUS } from './routing/draftPlanner.js';
 import { rankDraftCandidates } from './routing/draftRanking.js';
@@ -593,9 +593,7 @@ function bindEvents() {
   });
   $('show-all-btn').onclick = () => { state.visible = new Set(routesWithGeometry().map((r) => r.id)); renderRouteList(); syncMap(); notify.status('All available route lines shown.'); };
   $('hide-all-btn').onclick = () => { state.visible = new Set(); renderRouteList(); syncMap(); notify.status('All route lines hidden.'); };
-  $('fit-btn').onclick = () => {
-    if (!state.mapReady || !fitToRoutes(state.map, state.data.geojson, [...state.visible])) notify.status('There are no route lines to fit yet.');
-  };
+  $('route-list-toggle-btn').onclick = () => toggleRouteList($('route-list'), $('route-list-toggle-btn'));
   $('clear-trip-btn').onclick = clearTrip;
   $('swap-btn').onclick = swapTrip;
   $('data-banner').addEventListener('click', (e) => {

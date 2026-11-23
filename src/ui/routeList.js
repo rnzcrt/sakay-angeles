@@ -7,6 +7,15 @@ export function routeHasGeometry(route, geojson) {
   return (geojson?.features ?? []).some((f) => f.properties?.routeId === route.id);
 }
 
+export function toggleRouteList(list, button) {
+  const expanded = button.getAttribute('aria-expanded') === 'true';
+  const nextExpanded = !expanded;
+  list.hidden = !nextExpanded;
+  button.textContent = nextExpanded ? 'Collapse routes' : 'Expand routes';
+  button.setAttribute('aria-expanded', String(nextExpanded));
+  return nextExpanded;
+}
+
 const swatch = (route) =>
   `<span class="route-swatch" style="background:${escapeHtml(route.displayColor)}" aria-hidden="true"></span>`;
 

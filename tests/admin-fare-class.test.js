@@ -139,5 +139,6 @@ test('admin route selection and submit handlers are wired to the tested form wor
   assert.match(source, /\$\('route-select'\)\.addEventListener\('change',[\s\S]*?showRoute\(\)/);
   assert.match(source, /\$\('fare-class'\)\.addEventListener\('change',[\s\S]*?handleFareClassChange\(fareControls\(\), originalFareForm\)/);
   assert.match(source, /gatherRouteFormEdits\(\{ route, controls: fareControls\(\), original: originalFareForm,[\s\S]*?stopRows: \$\('stops-list'\)\.querySelectorAll/);
-  assert.match(source, /\$\('route-form'\)\.addEventListener\('submit',[\s\S]*?gatherRouteEdits\(\); const result = await api\('\/api\/admin\/save'/);
+  assert.match(source, /\$\('route-form'\)\.addEventListener\('submit',[\s\S]*?await saveCurrentRoute\(\)/);
+  assert.match(source, /async function saveCurrentRoute\(\)[\s\S]*?gatherRouteEdits\(\);[\s\S]*?api\('\/api\/admin\/save'/);
 });

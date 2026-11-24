@@ -9,7 +9,7 @@
     <div class="admin-heading"><div><p class="eyebrow">Private workspace</p><h1>Route management</h1><p>Changes are saved as unverified until you have enough evidence to review them.</p></div><button id="reload" class="admin-button secondary">Reload data</button></div>
     <section class="admin-grid">
       <article class="admin-card"><h2>Routes</h2><label for="route-select">Choose a route</label><select id="route-select"></select><div id="route-summary" class="admin-muted"></div><a id="open-tracer" class="admin-button" href="/trace.html">Open road tracer</a><p class="admin-muted">Trace roads, move or delete points, split directions, or reverse their order. Save geometry from the tracer when ready.</p></article>
-      <article class="admin-card"><h2>Route details</h2><form id="route-form" class="admin-form">
+      <article class="admin-card"><h2>Route details</h2><p id="unsaved-indicator" class="unsaved-indicator" role="status" aria-live="polite" hidden>Unsaved changes. Save or discard before leaving this route.</p><form id="route-form" class="admin-form">
         <label>Display name<input id="route-name" required maxlength="180"></label><label>Route description<textarea id="route-description" rows="3" maxlength="1200"></textarea></label>
         <label>Fare class<select id="fare-class"><option value="">Unknown</option><option value="traditional">Traditional jeepney</option><option value="modern">Modern jeepney</option></select></label>
         <fieldset class="audit-fields"><legend>Fare classification evidence</legend><p class="admin-muted">Enter or update these fields only when the fare classification has been reviewed. A fare-class change clears prior evidence.</p><label>Evidence source<input id="fare-evidence-source" maxlength="1000"></label><label>Review method<input id="fare-evidence-method" maxlength="1000"></label><label>Checked date<input id="fare-evidence-date" type="date"></label></fieldset>
@@ -22,4 +22,9 @@
     <p id="admin-status" class="admin-status" role="status" aria-live="polite"></p>
   </div>
 </main><script type="module" src="/src/admin.js"></script>
+<dialog id="unsaved-dialog" aria-labelledby="unsaved-title" aria-describedby="unsaved-description" class="unsaved-dialog">
+  <h2 id="unsaved-title">Unsaved route changes</h2>
+  <p id="unsaved-description">This route has unsaved edits. Save them before continuing, discard them, or cancel and keep editing.</p>
+  <div class="unsaved-actions"><button id="unsaved-cancel" class="admin-button secondary" type="button">Cancel</button><button id="unsaved-save" class="admin-button" type="button">Save and continue</button><button id="unsaved-discard" class="admin-button danger" type="button">Discard and continue</button></div>
+</dialog>
 </body></html>

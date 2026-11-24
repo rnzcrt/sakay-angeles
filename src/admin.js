@@ -1,9 +1,11 @@
 import './admin.css';
 import { escapeHtml } from './ui/html.js';
+import { gatherRouteFormEdits, handleFareClassChange, loadFareClassForm } from './admin/routeFareClass.js';
 import { ensureHistoryPreviewContainer, renderSavedDataPreview, toggleSavedDataPreview } from './admin/historyPreview.js';
 
 const $ = (id) => document.getElementById(id);
 let dataset; let selectedId = null;
+let originalFareForm = null;
 const announce = (message, error = false) => { $('admin-status').textContent = message; $('admin-status').classList.toggle('error', error); };
 async function api(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers } });
@@ -17,7 +19,7 @@ function showRoute() {
   const route = currentRoute(); if (!route) return;
   $('route-name').value = route.name;
   $('route-description').value = route.description ?? '';
-  $('fare-class').value = route.fareClass ?? '';
+  originalFareForm = loadFareClassForm(route, fareControls());
   $('route-summary').textContent = `${route.jeepneyColorName} jeepney · Geometry: ${route.geometryStatus} · Fare class: ${route.fareClass ?? 'unknown'}`;
   $('open-tracer').href = `/trace.html?route=${encodeURIComponent(route.id)}`;
   const stops = dataset.stops.filter((s) => s.routeId === route.id);
@@ -29,24 +31,17 @@ function renderRoutes() {
   $('route-select').value = selectedId; showRoute();
 }
 function audit() { return { change: $('audit-change').value.trim(), reason: $('audit-reason').value.trim(), source: $('audit-source').value.trim(), observation: $('audit-observation').value.trim(), date: new Date().toISOString().slice(0, 10) }; }
+function fareControls() {
+  return {
+    name: $('route-name'), description: $('route-description'), fareClass: $('fare-class'),
+    evidenceSource: $('fare-evidence-source'), evidenceMethod: $('fare-evidence-method'), evidenceDate: $('fare-evidence-date'),
+  };
+}
 function gatherRouteEdits() {
-  const route = currentRoute(); route.name = $('route-name').value.trim(); route.description = $('route-description').value.trim();
-  if ($('fare-class').value) {
-    route.fareClass = $('fare-class').value;
-    const record = audit();
-    route.fareClassEvidence = { source: record.source, method: `${record.change}. ${record.observation}`.slice(0, 1000), checkedAt: record.date };
-  } else { route.fareClass = null; delete route.fareClassEvidence; }
-  dataset.stops = dataset.stops.filter((s) => s.routeId !== selectedId);
-  for (const row of $('stops-list').querySelectorAll('.stop-row')) {
-    const id = row.dataset.stop;
-    const old = (dataset._originalStops || []).find((s) => s.id === id);
-    const value = (field) => row.querySelector(`[data-field="${field}"]`).value;
-    const stop = old ? structuredClone(old) : { id, routeId: selectedId, verificationStatus: 'unverified' };
-    stop.name = value('name').trim(); stop.kind = value('kind');
-    stop.coordinates = [value('lng').trim() === '' ? null : Number(value('lng')), value('lat').trim() === '' ? null : Number(value('lat'))];
-    if (stop.kind !== 'terminal') { stop.verificationStatus = 'unverified'; delete stop.source; }
-    dataset.stops.push(stop);
-  }
+  const route = currentRoute();
+  const gathered = gatherRouteFormEdits({ route, controls: fareControls(), original: originalFareForm, stops: dataset.stops,
+    selectedId, stopRows: $('stops-list').querySelectorAll('.stop-row'), originalStops: dataset._originalStops || [] });
+  dataset.stops = gathered.stops;
   dataset.routesFile.routes = dataset.routes;
 }
 async function loadAll() {
@@ -81,6 +76,9 @@ async function init() {
 }
 
 $('route-select').addEventListener('change', (e) => { selectedId = e.target.value; showRoute(); });
+$('fare-class').addEventListener('change', () => {
+  handleFareClassChange(fareControls(), originalFareForm);
+});
 $('reload').addEventListener('click', () => loadAll().then(() => announce('Route data reloaded.')).catch((e) => announce(e.message, true)));
 $('signout').addEventListener('click', async () => { await api('/auth/logout', { method: 'POST' }); location.reload(); });
 $('add-stop').addEventListener('click', () => {

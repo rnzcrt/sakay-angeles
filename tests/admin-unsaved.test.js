@@ -209,13 +209,27 @@ test('production admin uses the tracker, guard, and accessible Save/Discard/Canc
   assert.match(source, /choice === 'save' && !\$\('route-form'\)\.checkValidity\(\)[\s\S]*?\$\('unsaved-dialog'\)\.close\(\)[\s\S]*?\$\('route-form'\)\.reportValidity\(\)/);
   assert.match(source, /\$\('reload'\)\.addEventListener\('click',[\s\S]*?guardAction/);
   assert.match(source, /\$\('signout'\)\.addEventListener\('click',[\s\S]*?guardAction/);
-  assert.match(source, /\$\('add-stop'\)\.addEventListener\('click',[\s\S]*?refreshDirty\(\)/);
-  assert.match(source, /\$\('stops-list'\)\.addEventListener\('click',[\s\S]*?removeButton\.closest\('\.stop-row'\)\?\.remove\(\)/);
+  assert.match(source, /metadataOnly: true/);
+  assert.doesNotMatch(source, /add-stop|stops-list|add-direction|directions-list/);
   assert.match(adminHtml, /id="unsaved-indicator"[^>]*role="status"[^>]*aria-live="polite"/);
-  assert.match(adminHtml, /<dialog id="unsaved-dialog" aria-labelledby="unsaved-title" aria-describedby="unsaved-description"/);
-  assert.match(adminHtml, /id="unsaved-cancel"[^>]*>Cancel/);
-  assert.match(adminHtml, /id="unsaved-save"[^>]*>Save and continue/);
-  assert.match(adminHtml, /id="unsaved-discard"[^>]*>Discard and continue/);
+assert.match(
+  adminHtml,
+  /<dialog\b(?=[^>]*\bid="unsaved-dialog")(?=[^>]*\baria-labelledby="unsaved-title")(?=[^>]*\baria-describedby="unsaved-description")[^>]*>/
+);
+ assert.match(
+  adminHtml,
+  /id="unsaved-cancel"[\s\S]*?>\s*Cancel/
+);
+
+assert.match(
+  adminHtml,
+  /id="unsaved-save"[\s\S]*?>\s*Save and continue/
+);
+
+assert.match(
+  adminHtml,
+  /id="unsaved-discard"[\s\S]*?>\s*Discard and continue/
+);
   assert.match(source, /\$\('unsaved-dialog'\)\.addEventListener\('cancel',[\s\S]*?resolveGuard\('cancel'\)/);
   assert.match(source, /\$\('history-list'\)\.addEventListener\('click',[\s\S]*?guardAction\(\(\) => restoreRevision\(id\)\)/);
 });

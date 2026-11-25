@@ -16,12 +16,12 @@ const dataStore = createGitHubDataStore();
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(ROOT, 'dist');
 
-const PUBLIC_ROUTE_FIELDS = ['id', 'name', 'sourceLabel', 'sourceSubLabel', 'jeepneyColorName', 'displayColor', 'fareClass', 'fareClassEvidence', 'geometryStatus', 'geometryEvidence', 'tracingStatus', 'vehicleType', 'description', 'sourceLandmarks', 'labelNotes', 'source', 'requestedDirection'];
-const PUBLIC_STOP_FIELDS = ['id', 'routeId', 'name', 'kind', 'terminalLabel', 'verificationStatus', 'source', 'notes'];
+const PUBLIC_ROUTE_FIELDS = ['id', 'name', 'sourceLabel', 'sourceSubLabel', 'jeepneyColorName', 'displayColor', 'fareClass', 'fareClassEvidence', 'geometryStatus', 'geometryEvidence', 'tracingStatus', 'vehicleType', 'description', 'sourceLandmarks', 'labelNotes', 'source', 'requestedDirection', 'active', 'startPoint', 'destination', 'via'];
+const PUBLIC_STOP_FIELDS = ['id', 'routeId', 'directionId', 'name', 'kind', 'terminalLabel', 'verificationStatus', 'source', 'notes'];
 const PUBLIC_TRANSFER_FIELDS = ['id', 'fromStopId', 'toStopId', 'walkMeters', 'verificationStatus', 'source', 'notes'];
 const PUBLIC_GEOMETRY_FIELDS = ['routeId', 'directionId', 'geometryId', 'direction', 'oneWay', 'draft', 'startName', 'endName', 'startStopId', 'endStopId', 'endpointVerificationStatus', 'endpointSource'];
 const PUBLIC_EVIDENCE_FIELDS = ['source', 'method', 'checkedAt'];
-const PUBLIC_DIRECTION_FIELDS = ['id', 'geometryId', 'orderedStopIds', 'verificationStatus', 'label'];
+const PUBLIC_DIRECTION_FIELDS = ['id', 'geometryId', 'orderedStopIds', 'verificationStatus', 'label', 'active', 'startPoint', 'destination', 'via', 'description'];
 const PUBLIC_SECONDARY_SOURCE_FIELDS = ['source', 'status', 'matchToLegend', 'startPoint', 'endPoint', 'roads', 'landmarks', 'conflictsWithLegend'];
 const SESSION_TTL = 12 * 60 * 60 * 1000;
 const oauthLimiter = createRateLimiter({ limit: 20, windowMs: 15 * 60_000 });
@@ -122,17 +122,60 @@ function publicGeometry(value) {
 }
 function markEditedUnverified(d, routeIds, before) {
   const ids = new Set(routeIds);
+  const oldStops = new Map(before.stops.map((s) => [s.id, s]));
+  const nextStops = new Map(d.stops.map((stop) => [stop.id, stop]));
+  const changedStops = new Set();
+  for (const stop of before.stops) if (ids.has(stop.routeId) && JSON.stringify(stop) !== JSON.stringify(nextStops.get(stop.id))) changedStops.add(stop.id);
+  for (const stop of d.stops) if (ids.has(stop.routeId) && JSON.stringify(stop) !== JSON.stringify(oldStops.get(stop.id))) changedStops.add(stop.id);
+
+  const featuresFor = (features, id) => features.filter((feature) => feature.properties?.routeId === id);
+  const geometryChanged = new Set([...ids].filter((id) => JSON.stringify(featuresFor(before.geojson.features, id)) !== JSON.stringify(featuresFor(d.geojson.features, id))));
   d.routes = d.routes.map((route) => {
     if (!ids.has(route.id)) return route;
+    const previous = before.routes.find((item) => item.id === route.id);
+    const previousDirections = new Map((previous?.directions ?? []).map((direction) => [direction.id, direction]));
+    const affectedDirectionIds = new Set();
+    if (geometryChanged.has(route.id)) for (const direction of route.directions ?? []) affectedDirectionIds.add(direction.id);
+    else for (const direction of route.directions ?? []) {
+      const old = previousDirections.get(direction.id);
+      const changedDirectionClaim = old && ['geometryId', 'orderedStopIds', 'startPoint', 'destination', 'via'].some((field) => {
+        const previousValue = ['startPoint', 'destination', 'via'].includes(field) ? (old[field] || '') : old[field];
+        const nextValue = ['startPoint', 'destination', 'via'].includes(field) ? (direction[field] || '') : direction[field];
+        return JSON.stringify(previousValue) !== JSON.stringify(nextValue);
+      });
+      if (changedDirectionClaim) affectedDirectionIds.add(direction.id);
+      for (const stopId of changedStops) {
+        const oldStop = oldStops.get(stopId);
+        const nextStop = nextStops.get(stopId);
+        if (old?.orderedStopIds?.includes(stopId) || direction.orderedStopIds?.includes(stopId) || oldStop?.directionId === direction.id || nextStop?.directionId === direction.id) affectedDirectionIds.add(direction.id);
+      }
+    }
+    const directions = (route.directions ?? []).map((direction) => {
+      const old = previousDirections.get(direction.id);
+      if (!old || geometryChanged.has(route.id) || affectedDirectionIds.has(direction.id)) {
+        const { evidence, ...rest } = direction;
+        return { ...rest, verificationStatus: 'unverified' };
+      }
+      const { evidence, ...rest } = direction;
+      return { ...rest, verificationStatus: old.verificationStatus, ...(old.evidence ? { evidence: old.evidence } : {}) };
+    });
+    if (!previous || geometryChanged.has(route.id)) {
+      const { geometryEvidence, ...rest } = route;
+      return { ...rest, geometryStatus: 'unverified', directions };
+    }
     const { geometryEvidence, ...rest } = route;
-    return { ...rest, geometryStatus: 'unverified', directions: (rest.directions ?? []).map(({ evidence, ...direction }) => ({ ...direction, verificationStatus: 'unverified' })) };
+    return { ...rest, geometryStatus: previous.geometryStatus, ...(previous.geometryEvidence ? { geometryEvidence: previous.geometryEvidence } : {}), directions };
   });
-  d.geojson = { ...d.geojson, features: d.geojson.features.map((feature) => ids.has(feature.properties?.routeId) ? { ...feature, properties: { ...feature.properties, draft: true } } : feature) };
-  const oldStops = new Map(before.stops.map((s) => [s.id, s]));
+  d.geojson = { ...d.geojson, features: d.geojson.features.map((feature) => geometryChanged.has(feature.properties?.routeId) ? { ...feature, properties: { ...feature.properties, draft: true } } : feature) };
   d.stops = d.stops.map((stop) => {
-    if (!ids.has(stop.routeId) || JSON.stringify(stop) === JSON.stringify(oldStops.get(stop.id))) return stop;
+    if (!ids.has(stop.routeId)) return stop;
+    const previous = oldStops.get(stop.id);
+    if (!previous || changedStops.has(stop.id)) {
+      const { source, ...rest } = stop;
+      return { ...rest, verificationStatus: 'unverified' };
+    }
     const { source, ...rest } = stop;
-    return { ...rest, verificationStatus: 'unverified' };
+    return { ...rest, verificationStatus: previous.verificationStatus, ...(previous.source ? { source: previous.source } : {}) };
   });
 }
 async function writeDataset(d, { expectedCommitSha, audit, author }) {
@@ -149,7 +192,16 @@ function sameOrigin(req) {
   const origin = req.headers.origin;
   if (!origin) return false;
   const expected = process.env.BASE_URL ? new URL(process.env.BASE_URL).origin : `http://${req.headers.host}`;
-  return origin === expected;
+  if (origin === expected) return true;
+
+  // The local Vite admin page proxies writes to the Node server, so the
+  // browser origin is localhost:5173 while BASE_URL points at localhost:4173.
+  // Accept only Vite's fixed loopback origins during non-production runs.
+  if (process.env.NODE_ENV === 'production') return false;
+  let base;
+  try { base = new URL(expected); } catch { return false; }
+  if (base.protocol !== 'http:' || !['localhost', '127.0.0.1'].includes(base.hostname)) return false;
+  return origin === 'http://localhost:5173' || origin === 'http://127.0.0.1:5173';
 }
 
 function requestAddress(req) {
@@ -164,8 +216,7 @@ function securityHeaders() {
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self)',
-    'Content-Security-Policy': "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://github.com; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://fonts.openmaptiles.org; img-src 'self' data: blob: https:; worker-src 'self' blob:; connect-src 'self' https://tiles.openfreemap.org https://nominatim.openstreetmap.org https://router.project-osrm.org https://routing.openstreetmap.de https://overpass-api.de; upgrade-insecure-requests",
-
+'Content-Security-Policy': `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://github.com; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com https://fonts.openmaptiles.org; img-src 'self' data: blob: https:; worker-src 'self' blob:; connect-src 'self' https://tiles.openfreemap.org https://nominatim.openstreetmap.org https://router.project-osrm.org https://routing.openstreetmap.de https://overpass-api.de${secureCookie ? '; upgrade-insecure-requests' : ''}`,
   };
   if (secureCookie) headers['Strict-Transport-Security'] = 'max-age=31536000';
   return headers;
@@ -174,7 +225,10 @@ function securityHeaders() {
 function changedRouteIds(before, next) {
   const ids = new Set();
   const routes = new Map(before.routes.map((route) => [route.id, route]));
-  for (const route of next.routes) if (JSON.stringify(route) !== JSON.stringify(routes.get(route.id))) ids.add(route.id);
+  const nextRoutes = new Map(next.routes.map((route) => [route.id, route]));
+  for (const id of new Set([...routes.keys(), ...nextRoutes.keys()])) {
+    if (JSON.stringify(routes.get(id)) !== JSON.stringify(nextRoutes.get(id))) ids.add(id);
+  }
   const groupedFeatures = (features) => {
     const result = new Map();
     for (const feature of features) {
@@ -259,12 +313,17 @@ const server = http.createServer(async (req, res) => {
         const before = await readData({ refresh: true }); const d = payload.data;
         if (!/^[a-f0-9]{40}$/i.test(payload.expectedCommitSha || '') || payload.expectedCommitSha !== before.commitSha) return json(res, 409, { error: 'Route data changed since you loaded it. Reload the latest data before saving.' });
         if (!d || !Array.isArray(d.routes) || !Array.isArray(d.stops) || !Array.isArray(d.transfers) || !d.geojson || !Array.isArray(d.geojson.features) ||
-            !Array.isArray(payload.editedRouteIds) || payload.editedRouteIds.length === 0 || !payload.editedRouteIds.every((id) => before.routes.some((r) => r.id === id))) return json(res, 400, { error: 'Invalid route dataset or edited route list.' });
-        if (d.routes.length !== before.routes.length || d.routes.some((r) => !r || !before.routes.some((old) => old.id === r.id))) return json(res, 400, { error: 'Route identifiers cannot be added or removed here.' });
+            !Array.isArray(payload.editedRouteIds) || payload.editedRouteIds.length === 0 || !payload.editedRouteIds.every((id) => typeof id === 'string' && (before.routes.some((r) => r.id === id) || d.routes.some((r) => r?.id === id)))) return json(res, 400, { error: 'Invalid route dataset or edited route list.' });
+        if (new Set(d.routes.map((r) => r?.id)).size !== d.routes.length) return json(res, 400, { error: 'Route identifiers must be unique.' });
         const actualEditedIds = changedRouteIds(before, d);
         const declaredEditedIds = new Set(payload.editedRouteIds);
-        if (!actualEditedIds.size || actualEditedIds.size !== declaredEditedIds.size || [...actualEditedIds].some((id) => !declaredEditedIds.has(id))) return json(res, 400, { error: 'editedRouteIds must list exactly the changed routes; empty saves are not accepted.' });
-        if (JSON.stringify(before.transfers) !== JSON.stringify(d.transfers)) return json(res, 400, { error: 'Transfer records cannot be changed through route geometry editing.' });
+        if (!actualEditedIds.size || payload.editedRouteIds.length !== declaredEditedIds.size || actualEditedIds.size !== declaredEditedIds.size || [...actualEditedIds].some((id) => !declaredEditedIds.has(id))) return json(res, 400, { error: 'editedRouteIds must list exactly the changed routes; empty saves are not accepted.' });
+        const nextTransfers = new Map(d.transfers.map((transfer) => [transfer?.id, transfer]));
+        if (nextTransfers.size !== d.transfers.length || d.transfers.some((transfer) => !before.transfers.some((old) => old.id === transfer?.id && JSON.stringify(old) === JSON.stringify(transfer)))) return json(res, 400, { error: 'Transfer records cannot be added or edited through route management.' });
+        const retainedStopIds = new Set(d.stops.map((stop) => stop.id));
+        const deletedStopIds = new Set(before.stops.filter((stop) => !retainedStopIds.has(stop.id)).map((stop) => stop.id));
+        const deletedTransfers = before.transfers.filter((transfer) => !nextTransfers.has(transfer.id));
+        if (deletedTransfers.some((transfer) => !deletedStopIds.has(transfer.fromStopId) && !deletedStopIds.has(transfer.toStopId))) return json(res, 400, { error: 'A transfer may only be removed as part of deleting a route stop it references.' });
         d.routesFile = before.routesFile; d.stopsFile = before.stopsFile;
         markEditedUnverified(d, payload.editedRouteIds, before);
         const check = datasetValidation(d); if (!check.valid) return json(res, 422, { error: 'Route data did not pass validation.', details: check.errors.slice(0, 20) });
@@ -356,25 +415,40 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && pathname === '/api/routes') {
       const data = await readData();
+      const publicRoutes = data.routes.filter((route) => route.active !== false);
+      const publicRouteIds = new Set(publicRoutes.map((route) => route.id));
+      const publicDirections = new Map(publicRoutes.map((route) => [route.id, new Set((route.directions ?? []).filter((direction) => direction.active !== false).map((direction) => direction.id))]));
+      const stopIsPublic = (stop) => publicRouteIds.has(stop.routeId) && (!stop.directionId || publicDirections.get(stop.routeId)?.has(stop.directionId));
+      const publicStopIds = new Set(data.stops.filter(stopIsPublic).map((stop) => stop.id));
       return json(res, 200, {
         meta: {
           ...(typeof data.routesFile.source === 'string' ? { source: data.routesFile.source } : {}),
           ...(typeof data.routesFile.dataStatus === 'string' ? { dataStatus: data.routesFile.dataStatus } : {}),
         },
-        stops: data.stops.filter((stop) => stop && typeof stop === 'object' && !Array.isArray(stop)).map((stop) => {
+        stops: data.stops.filter((stop) => stop && typeof stop === 'object' && !Array.isArray(stop) && stopIsPublic(stop)).map((stop) => {
           const result = publicRecord(stop, PUBLIC_STOP_FIELDS);
           const coordinates = publicCoordinates(stop.coordinates);
           if (coordinates?.length === 2 && coordinates.every((n) => typeof n === 'number')) result.coordinates = coordinates;
           return result;
         }),
-        transfers: data.transfers.map((transfer) => publicRecord(transfer, PUBLIC_TRANSFER_FIELDS)),
-        routes: data.routes.filter((route) => route && typeof route === 'object' && !Array.isArray(route)).map((route) => ({
+        transfers: data.transfers.filter((transfer) => publicStopIds.has(transfer.fromStopId) && publicStopIds.has(transfer.toStopId)).map((transfer) => publicRecord(transfer, PUBLIC_TRANSFER_FIELDS)),
+        routes: publicRoutes.filter((route) => route && typeof route === 'object' && !Array.isArray(route)).map((route) => ({
           ...publicRoute(route),
-          verifiedTerminals: data.stops.filter((stop) => stop.routeId === route.id && stop.kind === 'terminal' && stop.verificationStatus === 'verified').map((stop) => publicRecord(stop, PUBLIC_STOP_FIELDS)),
+          directions: Array.isArray(route.directions) ? route.directions.filter((direction) => direction?.active !== false).map(publicDirection) : [],
+          verifiedTerminals: data.stops.filter((stop) => stop.routeId === route.id && stopIsPublic(stop) && stop.kind === 'terminal' && stop.verificationStatus === 'verified').map((stop) => publicRecord(stop, PUBLIC_STOP_FIELDS)),
         })),
         geojson: {
           type: data.geojson.type,
-          features: data.geojson.features.map((feature) => ({
+          features: data.geojson.features.filter((feature) => {
+            const route = data.routes.find((item) => item.id === feature.properties?.routeId);
+            if (!route || route.active === false) return false;
+            const directions = route.directions ?? [];
+            const direction = directions.find((item) => item.id === feature.properties?.directionId || item.geometryId === feature.properties?.geometryId);
+            if (direction) return direction.active !== false;
+            // Legacy a/b geometry is public only while the route has no explicit
+            // direction records to which it can be safely associated.
+            return directions.length === 0;
+          }).map((feature) => ({
             type: feature.type,
             properties: publicRecord(feature.properties, PUBLIC_GEOMETRY_FIELDS),
             geometry: publicGeometry(feature.geometry),

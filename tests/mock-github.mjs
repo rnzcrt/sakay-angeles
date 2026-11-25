@@ -7,6 +7,9 @@ const realFetch = globalThis.fetch;
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const readFixture = (name) => JSON.parse(readFileSync(path.join(root, 'public/data', name), 'utf8'));
 const fixtureRoutes = readFixture('routes.json');
+const fixtureStops = readFixture('stops.json');
+fixtureStops.transfers ??= [];
+fixtureStops.transfers.push({ id: 'test-m-gate-transfer', fromStopId: 'm-gate-friendship-terminal-a', toStopId: 'm-gate-friendship-terminal-b', walkMeters: 30, verificationStatus: 'unverified' });
 fixtureRoutes.routes[0].privateAdminNote = 'fixture-admin-only-value';
 fixtureRoutes.routes[0].geometryStatus = 'verified';
 fixtureRoutes.routes[0].geometryEvidence = {
@@ -46,7 +49,7 @@ const dataApi = new FakeGitHubDataApi({
   initialMessage: `Initial synthetic fixture\n\nSakay-Audit: ${initialAudit}`,
   initialFiles: {
     'routes.json': fixtureRoutes,
-    'stops.json': readFixture('stops.json'),
+    'stops.json': fixtureStops,
     'routes.geojson': fixtureGeojson,
   },
 });

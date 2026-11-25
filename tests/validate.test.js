@@ -73,7 +73,7 @@ test('a verified direction may not use unverified stops or lack geometry', () =>
   assert.ok(codes(validateDataset(e)).includes('incomplete_verified'));
 });
 
-test('verified route geometry, directions, stops, and fare classes need traceable evidence', () => {
+test('verified geometry and stops need evidence; optional fare evidence is validated when present', () => {
   const geometry = makeData();
   delete geometry.routes[0].geometryEvidence;
   assert.ok(codes(validateDataset(geometry)).includes('missing_verification_evidence'));
@@ -84,7 +84,7 @@ test('verified route geometry, directions, stops, and fare classes need traceabl
 
   const fare = makeData();
   fare.routes[0].fareClass = 'traditional';
-  assert.ok(codes(validateDataset(fare)).includes('missing_verification_evidence'));
+  assert.equal(validateDataset(fare).valid, true);
   fare.routes[0].fareClassEvidence = { source: 'PTRO', method: 'operator confirmation', checkedAt: '2026-10-20' };
   assert.equal(validateDataset(fare).valid, true);
   fare.routes[0].fareClassEvidence.checkedAt = '2026-99-99';
@@ -103,6 +103,96 @@ test('invalid verification statuses and transfers are caught', () => {
   assert.ok(c.includes('invalid_status'));
   assert.ok(c.includes('broken_reference'));
   assert.ok(c.includes('malformed_transfer'));
+});
+
+test('optional active flags must be booleans and legacy records remain compatible', () => {
+  const legacy = makeData();
+  assert.equal(validateDataset(legacy).valid, true, 'records without active flags preserve existing behavior');
+  const d = makeData();
+  d.routes[0].active = false;
+  d.routes[0].directions[0].active = true;
+  assert.equal(validateDataset(d).valid, true);
+  d.routes[0].directions[0].active = 'no';
+  assert.ok(codes(validateDataset(d)).includes('malformed_direction'));
+  d.routes[0].directions[0].active = true;
+  d.routes[0].active = 0;
+  assert.ok(codes(validateDataset(d)).includes('malformed_route'));
+});
+
+test('direction-associated stops must reference a direction on the same route', () => {
+  const d = makeData();
+  d.stops[0].routeId = 'R1';
+  d.stops[0].directionId = 'R1-out';
+  assert.equal(validateDataset(d).valid, true);
+  d.stops[0].directionId = 'missing-direction';
+  assert.ok(codes(validateDataset(d)).includes('broken_reference'));
+  d.stops[0].directionId = 'R2-out';
+  assert.ok(codes(validateDataset(d)).includes('broken_reference'));
+});
+
+test('stop order is unique and stop-direction assignments agree in both directions', () => {
+  const duplicate = makeData();
+  duplicate.routes[0].directions[0].orderedStopIds = ['A', 'B', 'A'];
+  assert.ok(codes(validateDataset(duplicate)).includes('malformed_direction'));
+
+  const mismatch = makeData();
+  mismatch.stops[0].routeId = 'R1';
+  mismatch.stops[0].directionId = 'R1-out';
+  mismatch.routes[0].directions[0].orderedStopIds = ['B', 'C', 'D'];
+  assert.ok(codes(validateDataset(mismatch)).includes('broken_reference'));
+
+  const crossDirection = makeData();
+  crossDirection.stops[0].routeId = 'R1';
+  crossDirection.stops[0].directionId = 'R2-out';
+  assert.ok(codes(validateDataset(crossDirection)).includes('broken_reference'));
+});
+
+test('geometry direction IDs must resolve while legacy a/b feature IDs remain compatible', () => {
+  const d = withGeo(makeData());
+  d.geojson.features[0].properties.directionId = 'R1-out';
+  assert.equal(validateDataset(d).valid, true);
+  d.geojson.features[0].properties.directionId = 'R1-ghost';
+  assert.ok(codes(validateDataset(d)).includes('broken_reference'));
+  const legacy = withGeo(makeData());
+  legacy.routes[0].directions = [];
+  legacy.geojson.features[0].properties.directionId = 'R1-a';
+  legacy.geojson.features[0].properties.direction = 'a';
+  assert.equal(validateDataset(legacy).valid, true, 'legacy direction feature IDs remain valid before explicit directions exist');
+});
+
+test('explicit geometry direction and geometry references must resolve consistently', () => {
+  const matchingById = withGeo(makeData());
+  matchingById.geojson.features[0].properties.directionId = 'R1-out';
+  assert.equal(validateDataset(matchingById).valid, true);
+
+  const wrongGeometry = withGeo(makeData());
+  wrongGeometry.geojson.features[0].properties.directionId = 'R1-out';
+  wrongGeometry.geojson.features[0].properties.geometryId = 'unrelated-geometry';
+  assert.ok(codes(validateDataset(wrongGeometry)).includes('broken_reference'));
+
+  const unknownDirectionWithKnownGeometry = withGeo(makeData());
+  unknownDirectionWithKnownGeometry.geojson.features[0].properties.directionId = 'R1-ghost';
+  assert.ok(codes(validateDataset(unknownDirectionWithKnownGeometry)).includes('broken_reference'));
+
+  const geometryOnly = withGeo(makeData());
+  delete geometryOnly.geojson.features[0].properties.directionId;
+  assert.equal(validateDataset(geometryOnly).valid, true, 'a stored geometryId can associate a feature with its direction');
+
+  const partialLegacy = withGeo(makeData());
+  partialLegacy.geojson.features.push({
+    type: 'Feature',
+    properties: { routeId: 'R1', directionId: 'R1-b', direction: 'b', geometryId: 'legacy-R1-b' },
+    geometry: { type: 'LineString', coordinates: [[0, 0], [0.01, 0]] },
+  });
+  assert.equal(validateDataset(partialLegacy).valid, true, 'an exact legacy a/b feature remains compatible beside explicit directions');
+
+  const generatedGeometryId = withGeo(makeData());
+  generatedGeometryId.routes[0].geometryStatus = 'unverified';
+  generatedGeometryId.routes[0].directions[0].verificationStatus = 'unverified';
+  generatedGeometryId.routes[0].directions[0].geometryId = undefined;
+  generatedGeometryId.geojson.features[0].properties.directionId = 'R1-out';
+  generatedGeometryId.geojson.features[0].properties.geometryId = 'R1-out-draft';
+  assert.equal(validateDataset(generatedGeometryId).valid, true, 'a direction ID can associate a newly drawn feature before a stored geometryId exists');
 });
 
 test('non-object / missing arrays are reported', () => {

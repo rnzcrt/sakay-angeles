@@ -133,12 +133,12 @@ test('admin form does not produce a valid save when replacement evidence is inco
   assert.ok(validateDataset(data).errors.some((error) => error.code === 'missing_verification_evidence'));
 });
 
-test('admin route selection and submit handlers are wired to the tested form workflow', () => {
+test('admin route selection and submit handlers use the metadata-only form workflow', () => {
   const source = readFileSync(fileURLToPath(new URL('../src/admin.js', import.meta.url)), 'utf8');
   assert.match(source, /originalFareForm = loadFareClassForm\(route, fareControls\(\)\)/);
   assert.match(source, /\$\('route-select'\)\.addEventListener\('change',[\s\S]*?showRoute\(\)/);
   assert.match(source, /\$\('fare-class'\)\.addEventListener\('change',[\s\S]*?handleFareClassChange\(fareControls\(\), originalFareForm\)/);
-  assert.match(source, /gatherRouteFormEdits\(\{ route, controls: fareControls\(\), original: originalFareForm,[\s\S]*?stopRows: \$\('stops-list'\)\.querySelectorAll/);
+  assert.match(source, /gatherRouteFormEdits\(\{ route, controls: fareControls\(\), original: originalFareForm,[\s\S]*?metadataOnly: true/);
   assert.match(source, /\$\('route-form'\)\.addEventListener\('submit',[\s\S]*?await saveCurrentRoute\(\)/);
   assert.match(source, /async function saveCurrentRoute\(\)[\s\S]*?gatherRouteEdits\(\);[\s\S]*?api\('\/api\/admin\/save'/);
 });

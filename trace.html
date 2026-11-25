@@ -42,10 +42,7 @@
 
     <div id="active-panel" class="card" hidden>
       <h3 class="detail-title" id="active-title"></h3>
-      <div class="actions" role="group" aria-label="Which part of the route">
-        <button type="button" class="btn btn-ghost" id="dir-a" data-dir="a" aria-pressed="true">Route 1 — going</button>
-        <button type="button" class="btn btn-ghost" id="dir-b" data-dir="b" aria-pressed="false">Route 2 — coming back</button>
-      </div>
+      <div class="actions" id="direction-controls" role="group" aria-label="Route directions"></div>
       <p class="muted" id="active-stats"></p>
       <p class="detail-flag" id="active-warning" hidden></p>
       <p class="detail-flag" id="detour-note" hidden></p>
@@ -76,14 +73,10 @@
     </div>
 
     <div class="section-head"><h2 class="section-title">Save route geometry</h2></div>
-    <fieldset class="trace-audit"><legend>Change record (required)</legend>
-      <label class="field-label" for="audit-change">What changed?</label><input id="audit-change" maxlength="1000" required />
-      <label class="field-label" for="audit-reason">Reason</label><textarea id="audit-reason" rows="2" maxlength="2000" required></textarea>
-      <label class="field-label" for="audit-source">Information source</label><input id="audit-source" maxlength="1000" required />
-      <label class="field-label" for="audit-observation">Observation or supporting feedback</label><textarea id="audit-observation" rows="2" maxlength="3000" required></textarea>
-    </fieldset>
     <p class="hint">The dashed lines on the map are your live preview. Preview them before publishing; published edits create a revision and remain labeled unverified.</p>
-    <div class="actions"><button type="button" class="btn btn-ghost" id="preview-route">Preview selected route</button><button type="button" class="btn btn-primary" id="save-geometry">Publish route geometry</button></div>
+    <p id="tracer-unsaved" class="hint" role="status" aria-live="polite"></p>
+    <div class="actions"><button type="button" class="btn btn-ghost" id="preview-route">Preview selected route</button><button type="button" class="btn btn-primary" id="save-geometry">Save route edits</button></div>
+    <section id="route-preview-panel" class="route-preview-panel card" aria-live="polite" hidden></section>
     <div class="section-head"><h2 class="section-title">Import and export</h2></div>
     <div class="actions"><button type="button" class="btn btn-ghost" id="start-over-btn">Start over (clear every traced line)</button></div>
     <div class="actions">

@@ -1,5 +1,4 @@
 import './styles.css';
-import { loadData } from './data/loadData.js';
 import { createMap, maplibregl } from './map/createMap.js';
 import { haversineMeters, pathLengthMeters } from './routing/geo.js';
 import { searchPlaces } from './services/geocoding.js';
@@ -9,9 +8,10 @@ import { renderGeocodeChoices } from './ui/tripResults.js';
 import { renderReferenceMaps } from './ui/referenceMaps.js';
 import { createNotifier } from './ui/notifications.js';
 import { escapeHtml } from './ui/html.js';
+import { renderRoutePreview } from './trace/preview.js';
 import { enrichFeatures } from './map/routeLayers.js';
 import {
-  DIRECTIONS, directionLabel, lineKey, emptyLine, pathOf, lineFromCoords, geojsonToLines, linesToGeoJson,
+  directionLabel, routeDirections, lineKey, emptyLine, pathOf, lineFromCoords, geojsonToLines, linesToGeoJson, insertWaypoint,
   lengthKm, analyzeLine, validateDraftExport, checkDirectionPair, splitLineAt, isDetour, findDetours, straightenDetours,
 } from './trace/geojson.js';
 
@@ -20,7 +20,13 @@ const notify = createNotifier({ statusEl: $('status-live'), alertEl: $('alert-ba
 const STORE_KEY = 'sakay-angeles-trace-drafts-v2';
 const OLD_KEY = 'sakay-angeles-trace-drafts-v1';
 
-const state = { routes: [], lines: new Map(), active: null, dir: 'a', map: null, ready: false, markers: [], choices: [], pending: 0, selected: null };
+const state = { routes: [], stops: [], loadedCommitSha: null, baseline: null, dirty: false, lines: new Map(), active: null, dir: 'a', map: null, ready: false, markers: [], choices: [], pending: 0, selected: null, saveInProgress: false };
+
+window.addEventListener('beforeunload', (event) => {
+  if (!state.dirty && state.pending === 0) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
 
 renderReferenceMaps($('ref-list'));
 
@@ -45,7 +51,25 @@ const getLine = (create = false) => {
   if (!state.lines.has(keyNow()) && create) state.lines.set(keyNow(), emptyLine());
   return state.lines.get(keyNow()) ?? null;
 };
-const routeLines = (id) => DIRECTIONS.map((d) => state.lines.get(lineKey(id, d))).filter(Boolean);
+const routeLines = (id) => {
+  const route = state.routes.find((item) => item.id === id);
+  return routeDirections(route).map((direction) => state.lines.get(lineKey(id, direction.id))).filter(Boolean);
+};
+
+function refreshUnsavedState() {
+  if (!state.baseline) return;
+  const snapshot = JSON.stringify({
+    routes: state.routes,
+    stops: state.stops,
+    features: linesToGeoJson(state.lines, state.routes).features,
+  });
+  state.dirty = snapshot !== state.baseline;
+  $('tracer-unsaved').textContent = state.dirty ? 'Unsaved route changes. Save route edits before leaving this page.' : '';
+  if (state.dirty) {
+    $('route-preview-panel').hidden = true;
+    $('route-preview-panel').replaceChildren();
+  }
+}
 
 // ---- segments (straight or road-snapped) ----
 async function makeSegment(a, b, { snap = $('snap-toggle').checked } = {}) {
@@ -87,11 +111,12 @@ function updateBusy() {
 function renderList() {
   $('trace-list').innerHTML = state.routes.map((r) => {
     const sel = r.id === state.active;
-    const km = (d) => { const l = state.lines.get(lineKey(r.id, d)); const p = l ? pathOf(l) : []; return p.length >= 2 ? lengthKm(p).toFixed(1) : null; };
-    const k1 = km('a');
-    const k2 = km('b');
-    const status = !k1 && !k2 ? 'not traced'
-      : [k1 ? `Route 1: ${k1} km` : 'Route 1 not traced', k2 ? `Route 2: ${k2} km` : 'Route 2 not traced yet'].join(' · ');
+    const directionStats = routeDirections(r).map((direction) => {
+      const line = state.lines.get(lineKey(r.id, direction.id));
+      const path = line ? pathOf(line) : [];
+      return path.length >= 2 ? `${direction.label}: ${lengthKm(path).toFixed(1)} km` : `${direction.label}: not traced`;
+    });
+    const status = directionStats.every((item) => item.endsWith('not traced')) ? 'not traced' : directionStats.join(' · ');
     return `<li class="route-item${sel ? ' is-selected' : ''}"><button type="button" class="route-select" style="padding-left:10px" data-route="${escapeHtml(r.id)}" aria-pressed="${sel}">
       <span class="route-swatch" style="background:${escapeHtml(r.displayColor)}" aria-hidden="true"></span>
       <span class="route-copy"><strong>${escapeHtml(r.name)}</strong><span>${escapeHtml(r.jeepneyColorName)} jeepney · ${status}</span></span></button></li>`;
@@ -109,11 +134,13 @@ function renderActive() {
   const one = state.lines.get(lineKey(r.id, 'a'));
   const two = state.lines.get(lineKey(r.id, 'b'));
   const has1 = Boolean(one && one.waypoints.length >= 2);
-  $('active-title').innerHTML = `<span class="route-swatch" style="background:${escapeHtml(r.displayColor)};height:20px" aria-hidden="true"></span> ${escapeHtml(r.name)} — ${state.dir === 'b' ? 'Route 2 (coming back)' : 'Route 1 (going)'}`;
-  for (const d of DIRECTIONS) $(`dir-${d}`).setAttribute('aria-pressed', String(d === state.dir));
+  $('active-title').innerHTML = `<span class="route-swatch" style="background:${escapeHtml(r.displayColor)};height:20px" aria-hidden="true"></span> ${escapeHtml(r.name)} — ${escapeHtml(directionLabel(state.dir, r))}`;
+  $('direction-controls').innerHTML = routeDirections(r).map((direction) => `<button type="button" class="btn btn-ghost" data-dir="${escapeHtml(direction.id)}" aria-pressed="${direction.id === state.dir}">${escapeHtml(direction.label)}</button>`).join('');
   const n = line?.waypoints.length ?? 0;
   $('active-stats').textContent = `${n} point${n === 1 ? '' : 's'} · about ${lengthKm(path).toFixed(2)} km.`;
-  if (state.dir === 'a') {
+  if (!['a', 'b'].includes(state.dir)) {
+    $('active-hint').textContent = n === 0 ? `Click the map to start tracing ${directionLabel(state.dir, r)}.` : `Continue tracing ${directionLabel(state.dir, r)}. Select a vertex, then click the map to insert a point after it.`;
+  } else if (state.dir === 'a') {
     $('active-hint').textContent = n === 0
       ? 'Click the map where Route 1 STARTS (the first terminal). That first click is the start.'
       : 'Click along the road to the END of Route 1. Your last click is the new terminal — Route 2 starts there.';
@@ -124,6 +151,7 @@ function renderActive() {
   } else {
     $('active-hint').textContent = 'Keep clicking along the way back (it can be a different road). When you reach the start terminal, press “Finish Route 2 at the start of Route 1”.';
   }
+  if (state.selected !== null) $('active-hint').textContent += ' A map click now inserts a vertex after the selected point.';
   $('twoway-toggle').checked = line ? !line.oneWay : false;
   $('start-name').value = line?.startName ?? '';
   $('end-name').value = line?.endName ?? '';
@@ -152,7 +180,7 @@ function renderActive() {
   $('straighten-btn').hidden = detours.length === 0;
   // Route 2 must start where Route 1 ends and end where Route 1 starts
   const pairEl = $('pair-check');
-  const pair = one && two ? checkDirectionPair(one, two) : null;
+  const pair = !r.directions?.length && one && two ? checkDirectionPair(one, two) : null;
   pairEl.hidden = !pair;
   if (pair) {
     pairEl.innerHTML = [
@@ -219,8 +247,11 @@ function renderCut() {
 
 function commit() {
   state.selected = null;
+  $('route-preview-panel').hidden = true;
+  $('route-preview-panel').replaceChildren();
   renderCut();
   saveLocal();
+  refreshUnsavedState();
   renderList();
   renderActive();
   syncMap();
@@ -232,8 +263,9 @@ async function addPoint(lngLat, opts = {}) {
   notify.clearAlert();
   const line = getLine(true);
   const p = [lngLat.lng, lngLat.lat];
-  if (line.waypoints.length) line.segments.push(await makeSegment(line.waypoints.at(-1), p, opts));
-  line.waypoints.push(p);
+  const insertAt = state.selected === null ? line.waypoints.length : state.selected + 1;
+  await insertWaypoint(line, insertAt, p, (from, to) => makeSegment(from, to, opts));
+  if (state.selected !== null && insertAt < line.waypoints.length - 1) notify.status('Inserted a new vertex after the selected point.');
   commit();
 }
 
@@ -263,17 +295,19 @@ function reverseLine(line) {
 }
 
 // ---- export / import ----
-function exportGeoJson() {
+function exportGeoJson({ allowEmpty = false } = {}) {
   const geo = linesToGeoJson(state.lines, state.routes);
-  const check = validateDraftExport(geo, state.routes);
+  const check = validateDraftExport(geo, state.routes, state.stops);
   if (!check.valid) { notify.alert(`Export has problems: ${check.errors[0].message}`); return null; }
-  if (geo.features.length === 0) { notify.alert('Nothing to export yet — trace at least one direction with 2+ points.'); return null; }
+  if (geo.features.length === 0 && !allowEmpty) { notify.alert('Nothing to export yet — trace at least one direction with 2+ points.'); return null; }
   return JSON.stringify(geo, null, 2);
 }
 
 function selectRoute(id) {
   state.active = id;
   const r = activeRoute();
+  const directions = routeDirections(r);
+  if (!directions.some((direction) => direction.id === state.dir)) state.dir = directions[0]?.id ?? 'a';
   const line = getLine();
   const path = line ? pathOf(line) : [];
   if (state.ready && path.length >= 2) {
@@ -281,13 +315,19 @@ function selectRoute(id) {
     path.forEach((p) => b.extend(p));
     state.map.fitBounds(b, { padding: 60, maxZoom: 16 });
   }
-  notify.status(`Tracing ${r.name}, ${directionLabel(state.dir)}.`);
+  notify.status(`Tracing ${r.name}, ${directionLabel(state.dir, r)}.`);
   commit();
 }
 
 function bind() {
   $('trace-list').addEventListener('click', (e) => { const b = e.target.closest('[data-route]'); if (b) selectRoute(b.dataset.route); });
-  document.querySelectorAll('[data-dir]').forEach((b) => b.addEventListener('click', () => { state.dir = b.dataset.dir; state.selected = null; selectRoute(state.active); }));
+  $('direction-controls').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-dir]');
+    if (!button) return;
+    state.dir = button.dataset.dir;
+    state.selected = null;
+    selectRoute(state.active);
+  });
   $('start-r2-btn').onclick = () => enqueue(async () => {
     const one = state.lines.get(lineKey(state.active, 'a'));
     if (!one || one.waypoints.length < 2) { notify.alert('Trace Route 1 first.'); return; }
@@ -358,7 +398,7 @@ function bind() {
   $('undo-btn').onclick = () => enqueue(async () => { const l = getLine(); if (l?.waypoints.length) await deleteWaypoint(l.waypoints.length - 1); });
   $('clear-btn').onclick = () => {
     const r = activeRoute();
-    if (r && getLine()?.waypoints.length && confirm(`Clear ${directionLabel(state.dir)} of ${r.name}?`)) { state.lines.delete(keyNow()); commit(); }
+    if (r && getLine()?.waypoints.length && confirm(`Clear ${directionLabel(state.dir, r)} of ${r.name}?`)) { state.lines.delete(keyNow()); commit(); }
   };
   $('start-over-btn').onclick = () => {
     if (!confirm('Clear every traced line and start again? The app will then show only routes you trace from now on (you can undo this with “Use the shipped file instead” in the main app).')) return;
@@ -370,8 +410,8 @@ function bind() {
   };
   $('reverse-btn').onclick = () => { const l = getLine(); if (l) { reverseLine(l); commit(); } };
   $('twoway-toggle').onchange = (e) => { const l = getLine(true); l.oneWay = !e.target.checked; commit(); };
-  $('start-name').oninput = (e) => { const l = getLine(true); l.startName = e.target.value; saveLocal(); };
-  $('end-name').oninput = (e) => { const l = getLine(true); l.endName = e.target.value; saveLocal(); };
+  $('start-name').oninput = (e) => { const l = getLine(true); l.startName = e.target.value; saveLocal(); refreshUnsavedState(); };
+  $('end-name').oninput = (e) => { const l = getLine(true); l.endName = e.target.value; saveLocal(); refreshUnsavedState(); };
   $('export-btn').onclick = () => {
     const text = exportGeoJson();
     if (!text) return;
@@ -388,47 +428,128 @@ function bind() {
     catch { notify.alert('Could not copy automatically. Use Export instead.'); }
   };
   $('save-geometry').onclick = async () => {
-    const audit = Object.fromEntries(['change', 'reason', 'source', 'observation'].map((key) => [key, $(`audit-${key}`).value.trim()]));
-    if (Object.values(audit).some((v) => !v)) { notify.alert('Complete the change, reason, information source, and observation fields before saving.'); return; }
-    const geojson = exportGeoJson(); if (!geojson) return;
-    const current = await fetch('/api/admin/dataset').then((r) => r.json());
-    const nextGeo = JSON.parse(geojson);
-    const routeIds = new Set([...current.geojson.features, ...nextGeo.features].map((f) => f.properties?.routeId).filter(Boolean));
-    const changed = [...routeIds].filter((id) => {
-      const a = current.geojson.features.filter((f) => f.properties?.routeId === id).map((f) => ({ direction: f.properties?.direction, oneWay: f.properties?.oneWay, geometry: f.geometry }));
-      const b = nextGeo.features.filter((f) => f.properties?.routeId === id).map((f) => ({ direction: f.properties?.direction, oneWay: f.properties?.oneWay, geometry: f.geometry }));
-      return JSON.stringify(a) !== JSON.stringify(b);
-    });
-    if (!changed.length) { notify.status('No route geometry changes to save.'); return; }
-    nextGeo.features = nextGeo.features.map((feature) => {
-      const old = current.geojson.features.find((f) => f.properties?.routeId === feature.properties?.routeId && (f.properties?.direction || 'a') === (feature.properties?.direction || 'a'));
-      return old ? { ...feature, properties: { ...old.properties, ...feature.properties } } : feature;
-    });
-    const response = await fetch('/api/admin/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: { ...current, geojson: nextGeo }, editedRouteIds: changed, expectedCommitSha: current.commitSha, audit: { ...audit, date: new Date().toISOString().slice(0, 10) } }) });
-    const result = await response.json();
-    if (!response.ok) { notify.alert(result.details?.[0]?.message || result.error || 'Route geometry could not be saved.'); return; }
-    notify.status(`Saved ${changed.length} changed route${changed.length === 1 ? '' : 's'} as revision ${result.revision}. Route status remains unverified.`);
-    const saved = await loadData(import.meta.env.BASE_URL);
-    if (saved.ok) { state.routes = saved.data.routes; state.lines = geojsonToLines(saved.data.geojson); saveLocal(); renderList(); renderActive(); syncMap(); }
+    if (state.pending || state.saveInProgress) return;
+    state.saveInProgress = true;
+    const editorControls = [...$('sidebar').querySelectorAll('button, input, select, textarea')];
+    const disabledBeforeSave = editorControls.map((control) => control.disabled);
+    editorControls.forEach((control) => { control.disabled = true; });
+    $('sidebar').setAttribute('aria-busy', 'true');
+    $('map').inert = true;
+    try {
+      const geojson = exportGeoJson({ allowEmpty: true }); if (!geojson) return;
+      const currentResponse = await fetch('/api/admin/dataset');
+      const current = await currentResponse.json();
+      if (!currentResponse.ok) throw new Error(current.error || 'Could not load the latest route dataset.');
+      if (current.commitSha !== state.loadedCommitSha) throw new Error('Route data changed after this editor was opened. Reload the tracer before saving to avoid replacing a newer edit.');
+      const nextGeo = JSON.parse(geojson);
+      const represented = new Set(nextGeo.features.map((feature) => `${feature.properties?.routeId}|${feature.properties?.directionId || feature.properties?.direction || 'a'}`));
+      const preservedLegacyFeatures = current.geojson.features.filter((feature) => {
+        const route = state.routes.find((item) => item.id === feature.properties?.routeId);
+        if (!route?.directions?.length) return false;
+        const matched = route.directions.some((direction) => direction.id === feature.properties?.directionId || (direction.geometryId && direction.geometryId === feature.properties?.geometryId));
+        const key = `${feature.properties?.routeId}|${feature.properties?.direction || 'a'}`;
+        return !matched && state.lines.has(key) && !represented.has(key);
+      });
+      nextGeo.features.push(...preservedLegacyFeatures);
+      const featureKey = (feature) => `${feature.properties?.routeId}|${feature.properties?.directionId || feature.properties?.direction || 'a'}`;
+      nextGeo.features = nextGeo.features.map((feature) => {
+        const old = current.geojson.features.find((candidate) => featureKey(candidate) === featureKey(feature) || (candidate.properties?.routeId === feature.properties?.routeId && candidate.properties?.geometryId && candidate.properties.geometryId === feature.properties?.geometryId));
+        return old ? { ...feature, properties: { ...old.properties, ...feature.properties } } : feature;
+      });
+      const grouped = (items, keyFor) => {
+        const map = new Map();
+        for (const item of items) map.set(keyFor(item), [...(map.get(keyFor(item)) ?? []), item]);
+        return map;
+      };
+      const oldRoutes = new Map(current.routes.map((route) => [route.id, route]));
+      const nextRoutes = new Map(state.routes.map((route) => [route.id, route]));
+      const oldFeatures = grouped(current.geojson.features, (feature) => feature.properties?.routeId);
+      const nextFeatures = grouped(nextGeo.features, (feature) => feature.properties?.routeId);
+      const oldStops = grouped(current.stops, (stop) => stop.routeId);
+      const nextStops = grouped(state.stops, (stop) => stop.routeId);
+      const routeIds = new Set([...oldRoutes.keys(), ...nextRoutes.keys(), ...oldFeatures.keys(), ...nextFeatures.keys(), ...oldStops.keys(), ...nextStops.keys()]);
+      const changed = [...routeIds].filter((id) => JSON.stringify(oldRoutes.get(id)) !== JSON.stringify(nextRoutes.get(id)) ||
+        JSON.stringify(oldFeatures.get(id) ?? []) !== JSON.stringify(nextFeatures.get(id) ?? []) ||
+        JSON.stringify(oldStops.get(id) ?? []) !== JSON.stringify(nextStops.get(id) ?? []));
+      if (!changed.length) { notify.status('No route geometry, direction, or stop changes to save.'); return; }
+      const nextData = { ...current, routes: state.routes, stops: state.stops, geojson: nextGeo, routesFile: { ...current.routesFile, routes: state.routes } };
+      const changedNames = changed.map((id) => state.routes.find((route) => route.id === id)?.name).filter(Boolean);
+      const audit = {
+        change: 'Saved route geometry',
+        reason: 'Route geometry was traced or edited in the private road tracer.',
+        source: 'Private road tracer',
+        observation: `Route geometry updated for ${changedNames.join(', ') || 'one or more Jeepneys'}. Changes remain unverified until reviewed.`,
+        date: new Date().toISOString().slice(0, 10),
+      };
+      const response = await fetch('/api/admin/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: nextData, editedRouteIds: changed, expectedCommitSha: state.loadedCommitSha, audit }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.details?.[0]?.message || result.error || 'Route edits could not be saved.');
+      let latest;
+      try {
+        const latestResponse = await fetch('/api/admin/dataset');
+        latest = await latestResponse.json();
+        if (!latestResponse.ok) throw new Error(latest.error || 'Dataset refresh failed.');
+      } catch {
+        state.dirty = true;
+        $('tracer-unsaved').textContent = 'The commit succeeded, but saved data could not be reloaded. Your editor is retained; reload before making another save.';
+        notify.alert(`Revision ${result.revision.slice(0, 8)} was saved, but the updated dataset could not be reloaded. Reload this page before editing again.`);
+        return;
+      }
+      state.routes = latest.routes;
+      state.stops = latest.stops;
+      state.lines = geojsonToLines(latest.geojson, state.routes);
+      state.loadedCommitSha = latest.commitSha;
+      state.baseline = JSON.stringify({ routes: state.routes, stops: state.stops, features: linesToGeoJson(state.lines, state.routes).features });
+      state.dirty = false;
+      $('tracer-unsaved').textContent = '';
+      saveLocal(); renderList(); renderActive(); syncMap();
+      notify.status(`Saved ${changed.length} changed route${changed.length === 1 ? '' : 's'} in revision ${result.revision.slice(0, 8)}. Changed geometry and stops remain unverified.`);
+    } catch (error) { notify.alert(error.message); }
+    finally {
+      editorControls.forEach((control, index) => { control.disabled = disabledBeforeSave[index]; });
+      $('sidebar').removeAttribute('aria-busy');
+      $('map').inert = false;
+      state.saveInProgress = false;
+    }
   };
   $('preview-route').onclick = () => {
-    const route = activeRoute(); const lines = route && routeLines(route.id).flatMap(pathOf);
-    if (!lines?.length) { notify.alert('Choose a route and trace at least one direction before previewing.'); return; }
-    const bounds = new maplibregl.LngLatBounds(lines[0], lines[0]); lines.forEach((point) => bounds.extend(point));
-    state.map.fitBounds(bounds, { padding: 70, maxZoom: 16, duration: 500 });
-    notify.status(`Previewing ${route.name} on the map. Review the dashed route before publishing.`);
+    const route = activeRoute();
+    if (!route) { notify.alert('Choose a route before previewing it.'); return; }
+    const routeStops = state.stops.filter((stop) => stop.routeId === route.id);
+    const directions = routeDirections(route).map((direction) => {
+      const line = state.lines.get(lineKey(route.id, direction.id));
+      const path = line ? pathOf(line) : [];
+      const stopById = new Map(routeStops.map((stop) => [stop.id, stop]));
+      const stops = (direction.orderedStopIds ?? []).map((id) => stopById.get(id)).filter(Boolean).map((stop) => ({ ...stop, geometryPosition: Array.isArray(stop.coordinates) ? `${stop.coordinates[0]}, ${stop.coordinates[1]}` : '' }));
+      const orderedIds = new Set(direction.orderedStopIds ?? []);
+      const unlistedStops = routeStops.filter((stop) => stop.directionId === direction.id && !orderedIds.has(stop.id));
+      return { ...direction, active: direction.active !== false, stops, unlistedStops, geometryPointCount: path.length, geometryLengthKm: lengthKm(path) };
+    });
+    const assignedStopIds = new Set(directions.flatMap((direction) => direction.stops.map((stop) => stop.id)));
+    const unassignedStops = routeStops.filter((stop) => !assignedStopIds.has(stop.id) && !stop.directionId);
+    const panel = $('route-preview-panel');
+    panel.innerHTML = renderRoutePreview({ route, directions, unassignedStops });
+    panel.hidden = false;
+    const points = directions.flatMap((direction) => state.lines.get(lineKey(route.id, direction.id))).filter(Boolean).flatMap(pathOf);
+    if (points.length) {
+      const bounds = new maplibregl.LngLatBounds(points[0], points[0]); points.forEach((point) => bounds.extend(point));
+      state.map.fitBounds(bounds, { padding: 70, maxZoom: 16, duration: 500 });
+    }
+    notify.status(`Previewing unsaved changes for ${route.name}. Save to persist this draft.`);
   };
   $('import-file').addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const imported = geojsonToLines(JSON.parse(await file.text()));
+      const imported = geojsonToLines(JSON.parse(await file.text()), state.routes);
       const known = new Set(state.routes.map((r) => r.id));
       let n = 0;
       for (const [key, line] of imported) if (known.has(key.slice(0, key.lastIndexOf('|')))) { state.lines.set(key, line); n += 1; }
       commit();
       notify.status(`Imported ${n} line${n === 1 ? '' : 's'}.`);
-    } catch { notify.alert('That file is not valid GeoJSON.'); }
+    } catch (error) {
+      notify.alert(error instanceof Error && error.message ? error.message : 'That file is not valid GeoJSON.');
+    }
     e.target.value = '';
   });
   $('goto-form').addEventListener('submit', async (e) => {
@@ -451,12 +572,15 @@ function bind() {
 }
 
 async function start() {
-  const loaded = await loadData(import.meta.env.BASE_URL);
-  if (!loaded.ok) { notify.alert(loaded.message); return; }
-  state.routes = loaded.data.routes;
-  // The server is the canonical source in the private editor. Browser drafts
-  // cannot silently override the current shared route dataset.
-  state.lines = geojsonToLines(loaded.data.geojson);
+  const response = await fetch('/api/admin/dataset');
+  const data = await response.json();
+  if (!response.ok) { notify.alert(data.error || 'Sign in to load the private route dataset.'); return; }
+  state.routes = data.routes;
+  state.stops = data.stops;
+  state.loadedCommitSha = data.commitSha;
+  // Shared route data is read through the authenticated API; local drafts do not override it.
+  state.lines = geojsonToLines(data.geojson, state.routes);
+  state.baseline = JSON.stringify({ routes: state.routes, stops: state.stops, features: linesToGeoJson(state.lines, state.routes).features });
   bind(); renderList(); renderActive();
   $('trace-legend').innerHTML = '<strong>Tracing tips</strong><div class="legend-row">Click = add point</div><div class="legend-row">Drag = move point</div><div class="legend-row">Double-click point = delete</div><div class="legend-row">Option/Alt + click = straight piece</div><div class="legend-row">S = start, E = end</div>';
 
@@ -467,7 +591,10 @@ async function start() {
   if (offline) window.__trace = state; // test hook (offline mode only)
   const routeParam = new URLSearchParams(location.search).get('route');
   if (routeParam && state.routes.some((r) => r.id === routeParam)) selectRoute(routeParam);
-  map.on('click', (e) => { const straight = Boolean(e.originalEvent?.altKey); enqueue(() => addPoint(e.lngLat, straight ? { snap: false } : {})); });
+  map.on('click', (e) => {
+    const straight = Boolean(e.originalEvent?.altKey);
+    enqueue(() => addPoint(e.lngLat, straight ? { snap: false } : {}));
+  });
   map.on('load', () => {
     const layout = { 'line-cap': 'round', 'line-join': 'round' };
     map.addSource('drafts', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
@@ -486,4 +613,6 @@ async function start() {
   });
 }
 
-start();
+start().catch((error) => notify.alert(error instanceof Error && error.message
+  ? error.message
+  : 'The private route dataset could not be loaded. Check your connection and reload the tracer.'));

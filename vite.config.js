@@ -5,10 +5,12 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: './',
   server: {
+    port: 5173,
+    strictPort: true,
     proxy: {
       '/api': 'http://localhost:4173',
       '/auth': 'http://localhost:4173',
-      '/admin': 'http://localhost:4173',
+      '^/admin(?:/|$)': 'http://localhost:4173',
       '/trace.html': 'http://localhost:4173',
     },
   },

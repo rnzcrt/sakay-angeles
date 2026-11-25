@@ -31,7 +31,7 @@ test('Node server enforces OAuth/admin boundaries and keeps route save/history i
   const mockWriteLog = path.join(mockLogDir, 'writes.log');
   const allowlist = process.env.ADMIN_GITHUB_USERS || 'allowed-admin';
   const child = spawn(process.execPath, ['--import', path.join(root, 'tests/mock-github.mjs'), path.join(root, 'server.js')], {
-    cwd: root, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', BASE_URL: base,
+    cwd: root, env: { ...process.env, NODE_ENV: 'development', PORT: String(port), HOST: '127.0.0.1', BASE_URL: base,
       GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID || 'test-client-id', GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET || 'test-client-secret',
       SESSION_SECRET: process.env.SESSION_SECRET || 'test-only-session-secret-with-more-than-32-bytes', ADMIN_GITHUB_USERS: allowlist,
       TRUST_PROXY_CLIENT_IP: 'true',
@@ -188,8 +188,27 @@ test('Node server enforces OAuth/admin boundaries and keeps route save/history i
   verifiedExampleRoute.fareClass = 'traditional';
   assert.equal((await loadData('/', async () => Response.json(verifiedExample))).ok, true, 'projected evidence satisfies client validation when geometry and fare class are verified');
   assert.equal((await fetch(`${base}/data/routes.json`)).status, 404, 'static repository copies are not served');
-  const dataset = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  let dataset = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
   const historicalDataset = structuredClone(dataset);
+  const metadataOnly = structuredClone(dataset);
+  const metadataRoute = metadataOnly.routes[0];
+  const metadataRouteId = metadataRoute.id;
+  metadataRoute.name = `${metadataRoute.name} metadata edit`;
+  metadataRoute.geometryStatus = 'unverified';
+  delete metadataRoute.geometryEvidence;
+  metadataRoute.directions[0].verificationStatus = 'unverified';
+  delete metadataRoute.directions[0].evidence;
+  response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({
+    data: metadataOnly, editedRouteIds: [metadataRouteId], expectedCommitSha: dataset.commitSha,
+    audit: { change: 'Synthetic metadata-only edit', reason: 'Preserve geometry verification for non-geometric edits', source: 'Automated test fixture', observation: 'Synthetic metadata only.' },
+  }) });
+  assert.equal(response.status, 200, 'metadata-only route edits are accepted');
+  dataset = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  const metadataSavedRoute = dataset.routes.find((item) => item.id === metadataRouteId);
+  assert.equal(metadataSavedRoute.geometryStatus, 'verified', 'metadata-only edits preserve geometry verification');
+  assert.deepEqual(metadataSavedRoute.geometryEvidence, historicalDataset.routes.find((item) => item.id === metadataRouteId).geometryEvidence);
+  assert.equal(metadataSavedRoute.directions[0].verificationStatus, 'verified');
+  assert.deepEqual(metadataSavedRoute.directions[0].evidence, historicalDataset.routes.find((item) => item.id === metadataRouteId).directions[0].evidence);
   const feature = dataset.geojson.features[0];
   const routeId = feature.properties.routeId;
   const originalGeometry = structuredClone(feature.geometry);
@@ -203,6 +222,8 @@ test('Node server enforces OAuth/admin boundaries and keeps route save/history i
   assert.equal(response.status, 415);
   response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: '{' });
   assert.equal(response.status, 400);
+  response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { ...headers, Origin: 'http://localhost:5173', 'Content-Type': 'application/json' }, body: '{' });
+  assert.equal(response.status, 400, 'the local Vite origin is allowed through the development proxy');
   response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: ' '.repeat(4_000_001) });
   assert.equal(response.status, 413);
   response = await fetch(`${base}/api/admin/history/item?id=..%2F..%2Fserver.js`, { headers });
@@ -222,6 +243,10 @@ test('Node server enforces OAuth/admin boundaries and keeps route save/history i
   invalidFeature.geometry.coordinates[0] = [999, 999];
   response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(invalidDataset) });
   assert.equal(response.status, 422, 'invalid datasets do not create a remote commit');
+  const invalidDirection = structuredClone(payload);
+  invalidDirection.data.geojson.features.find((candidate) => candidate.properties.routeId === routeId).properties.directionId = `${routeId}-missing-direction`;
+  response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(invalidDirection) });
+  assert.equal(response.status, 422, 'geometry with a missing direction reference is rejected server-side');
 
   response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   assert.equal(response.status, 200);
@@ -230,7 +255,7 @@ test('Node server enforces OAuth/admin boundaries and keeps route save/history i
   assert.notDeepEqual(firstSaved.geojson.features.find((item) => item.properties.routeId === routeId).geometry, originalGeometry);
   const refreshedPublicData = await (await fetch(`${base}/api/routes`)).json();
   assert.deepEqual(refreshedPublicData.geojson.features.find((item) => item.properties.routeId === routeId).geometry, firstSaved.geojson.features.find((item) => item.properties.routeId === routeId).geometry);
-  assert.equal((await (await fetch(`${base}/api/admin/history`, { headers })).json()).length, 2);
+  assert.equal((await (await fetch(`${base}/api/admin/history`, { headers })).json()).length, 3);
   const historyResponse = await fetch(`${base}/api/admin/history/item?id=${encodeURIComponent(revision)}`, { headers });
   assert.equal(historyResponse.status, 200);
   const revisionSnapshot = await historyResponse.json();
@@ -254,7 +279,7 @@ test('Node server enforces OAuth/admin boundaries and keeps route save/history i
   response = await fetch(`${base}/api/admin/save`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify(secondPayload) });
   assert.equal(response.status, 200);
   const secondCommitSha = (await response.json()).commitSha;
-  assert.equal((await (await fetch(`${base}/api/admin/history`, { headers })).json()).length, 3);
+  assert.equal((await (await fetch(`${base}/api/admin/history`, { headers })).json()).length, 4);
   response = await fetch(`${base}/api/admin/restore`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: dataset.commitSha, expectedCommitSha: secondCommitSha }) });
   assert.equal(response.status, 200);
   const restoredRevision = (await response.json()).commitSha;
@@ -272,15 +297,104 @@ test('Node server enforces OAuth/admin boundaries and keeps route save/history i
   assert.ok(restoredRoute.directions.every((item) => item.verificationStatus === 'unverified'));
   assert.ok(restoredRoute.directions.every((item) => !Object.hasOwn(item, 'evidence')), 'direction evidence is removed');
   const historyAfterRestore = await (await fetch(`${base}/api/admin/history`, { headers })).json();
-  assert.equal(historyAfterRestore.length, 4, 'restore adds a commit without rewriting existing history');
+  assert.equal(historyAfterRestore.length, 5, 'restore adds a commit without rewriting existing history');
   assert.equal(historyAfterRestore[0].commitSha, restoredRevision);
-  assert.deepEqual(new Set(historyAfterRestore.map((item) => item.commitSha)), new Set([dataset.commitSha, revision, secondCommitSha, restoredRevision]), 'restored source revision and both later commits remain in history');
+  assert.deepEqual(new Set(historyAfterRestore.map((item) => item.commitSha)), new Set([historicalDataset.commitSha, dataset.commitSha, revision, secondCommitSha, restoredRevision]), 'restored source revision and all later commits remain in history');
 
+  const saveAdminDataset = async (current, data, editedRouteId, change) => fetch(`${base}/api/admin/save`, {
+    method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data, editedRouteIds: [editedRouteId], expectedCommitSha: current.commitSha,
+      audit: { change, reason: 'Synthetic route-management integration test', source: 'Automated test fixture', observation: 'No real-world route details were used.' } }),
+  });
+  let managed = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  const spoofRouteId = 'test-managed-unverified-route';
+  const spoofData = structuredClone(managed);
+  spoofData.routes.push({ id: spoofRouteId, name: 'Synthetic unverified route', sourceLabel: 'Synthetic test label', jeepneyColorName: 'Slate', displayColor: '#667788', geometryStatus: 'verified', geometryEvidence: { source: 'Synthetic claim', method: 'Automated test fixture', checkedAt: '2026-01-01' }, description: 'Test-only route with no traced geometry.', directions: [], active: true });
+  spoofData.routesFile.routes = spoofData.routes;
+  response = await saveAdminDataset(managed, spoofData, spoofRouteId, 'Reject client-supplied verification');
+  assert.equal(response.status, 200);
+  managed = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  const storedSpoofRoute = managed.routes.find((item) => item.id === spoofRouteId);
+  assert.equal(storedSpoofRoute.geometryStatus, 'unverified', 'a newly created route cannot self-assert verified geometry');
+  assert.equal(Object.hasOwn(storedSpoofRoute, 'geometryEvidence'), false);
+  const removeSpoof = structuredClone(managed);
+  removeSpoof.routes = removeSpoof.routes.filter((item) => item.id !== spoofRouteId);
+  removeSpoof.routesFile.routes = removeSpoof.routes;
+  response = await saveAdminDataset(managed, removeSpoof, spoofRouteId, 'Remove synthetic verification test route');
+  assert.equal(response.status, 200);
+  managed = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  const addedRoute = { id: 'test-managed-jeepney', name: 'Synthetic managed route', sourceLabel: 'Synthetic test label', jeepneyColorName: 'Slate', displayColor: '#667788', geometryStatus: 'unverified', tracingStatus: 'ready-for-tracing', description: 'Test-only metadata.', directions: [], active: true };
+  const withAdded = structuredClone(managed); withAdded.routes.push(addedRoute); withAdded.routesFile.routes = withAdded.routes;
+  response = await saveAdminDataset(managed, withAdded, addedRoute.id, 'Add synthetic Jeepney before tracing');
+  assert.equal(response.status, 200, 'authorized admins can save a new Jeepney before tracing');
+  managed = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  const savedWithoutGeometry = managed.routes.find((item) => item.id === addedRoute.id);
+  assert.ok(savedWithoutGeometry, 'new Jeepney is persisted before route tracing');
+  assert.equal(savedWithoutGeometry.geometryStatus, 'unverified');
+  assert.deepEqual(savedWithoutGeometry.directions, [], 'new Jeepney does not need directions before tracing');
+  assert.equal(managed.geojson.features.some((item) => item.properties.routeId === addedRoute.id), false, 'new Jeepney is saved without geometry');
+  let publicManaged = await (await fetch(`${base}/api/routes`)).json();
+  assert.equal(publicManaged.routes.find((item) => item.id === addedRoute.id).displayColor, '#667788', 'new active Jeepney metadata is public before tracing');
+
+  const withTrace = structuredClone(managed);
+  withTrace.routes.find((item) => item.id === addedRoute.id).directions.push({ id: 'test-managed-direction', geometryId: 'test-managed-geometry', label: 'Synthetic A to B', verificationStatus: 'unverified', orderedStopIds: [], active: true });
+  withTrace.geojson.features.push({ type: 'Feature', properties: { routeId: addedRoute.id, directionId: 'test-managed-direction', geometryId: 'test-managed-geometry', direction: 'a', draft: true }, geometry: { type: 'LineString', coordinates: [[120, 15], [120.01, 15]] } });
+  response = await saveAdminDataset(managed, withTrace, addedRoute.id, 'Save synthetic traced geometry');
+  assert.equal(response.status, 200, 'traced geometry can be saved in a second save without starting point or destination fields');
+  managed = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  publicManaged = await (await fetch(`${base}/api/routes`)).json();
+  assert.equal(publicManaged.routes.find((item) => item.id === addedRoute.id).active, true);
+  assert.equal(publicManaged.routes.find((item) => item.id === addedRoute.id).directions[0].id, 'test-managed-direction');
+  assert.equal(publicManaged.geojson.features.some((item) => item.properties.routeId === addedRoute.id), true, 'traced geometry is served after the second save');
+  const directionInactiveData = structuredClone(managed);
+  directionInactiveData.routes.find((item) => item.id === addedRoute.id).directions[0].active = false;
+  response = await saveAdminDataset(managed, directionInactiveData, addedRoute.id, 'Deactivate synthetic direction');
+  assert.equal(response.status, 200);
+  publicManaged = await (await fetch(`${base}/api/routes`)).json();
+  assert.ok(publicManaged.routes.some((item) => item.id === addedRoute.id), 'active Jeepney stays public when one direction is inactive');
+  assert.equal(publicManaged.routes.find((item) => item.id === addedRoute.id).directions.length, 0, 'inactive direction is omitted');
+  assert.equal(publicManaged.stops.some((item) => item.id === 'test-managed-stop'), false, 'direction-associated stops follow direction publication state');
+  assert.equal(publicManaged.geojson.features.some((item) => item.properties.routeId === addedRoute.id), false, 'inactive direction geometry is withheld');
+  managed = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  const inactiveData = structuredClone(managed);
+  inactiveData.routes.find((item) => item.id === addedRoute.id).active = false;
+  response = await saveAdminDataset(managed, inactiveData, addedRoute.id, 'Deactivate synthetic managed route');
+  assert.equal(response.status, 200);
+  publicManaged = await (await fetch(`${base}/api/routes`)).json();
+  assert.equal(publicManaged.routes.some((item) => item.id === addedRoute.id), false, 'inactive route is withheld from public listing');
+  assert.equal(publicManaged.stops.some((item) => item.id === 'test-managed-stop'), false, 'inactive route stops are withheld');
+  assert.equal(publicManaged.geojson.features.some((item) => item.properties.routeId === addedRoute.id), false, 'inactive route geometry is withheld');
+  const inactiveSaved = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  const deletedData = structuredClone(inactiveSaved);
+  deletedData.routes = deletedData.routes.filter((item) => item.id !== addedRoute.id);
+  deletedData.stops = deletedData.stops.filter((item) => item.routeId !== addedRoute.id);
+  deletedData.geojson.features = deletedData.geojson.features.filter((item) => item.properties.routeId !== addedRoute.id);
+  deletedData.routesFile.routes = deletedData.routes;
+  response = await saveAdminDataset(inactiveSaved, deletedData, addedRoute.id, 'Delete empty synthetic managed route');
+  assert.equal(response.status, 200, 'route, direction, stop and geometry deletion can be committed together without orphaning references');
+  const afterDelete = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  assert.equal(afterDelete.routes.some((item) => item.id === addedRoute.id), false);
+  assert.equal(afterDelete.stops.some((item) => item.id === 'test-managed-stop'), false);
+  assert.equal(afterDelete.geojson.features.some((item) => item.properties.routeId === addedRoute.id), false);
+
+  const historyBeforeStaleRestore = await (await fetch(`${base}/api/admin/history`, { headers })).json();
   response = await fetch(`${base}/api/admin/restore`, { method: 'POST', headers: { ...originHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ id: dataset.commitSha, expectedCommitSha: secondCommitSha }) });
   assert.equal(response.status, 409, 'stale expectedCommitSha rejects restoration');
   const historyAfterStaleRestore = await (await fetch(`${base}/api/admin/history`, { headers })).json();
-  assert.equal(historyAfterStaleRestore.length, 4, 'stale restoration does not create a commit');
-  assert.equal(historyAfterStaleRestore[0].commitSha, restoredRevision, 'stale restoration leaves the branch head unchanged');
+  assert.equal(historyAfterStaleRestore.length, historyBeforeStaleRestore.length, 'stale restoration does not create a commit');
+  assert.equal(historyAfterStaleRestore[0].commitSha, historyBeforeStaleRestore[0].commitSha, 'stale restoration leaves the branch head unchanged');
+
+  const beforeCascadeDelete = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  const cascadeData = structuredClone(beforeCascadeDelete);
+  const removedStopIds = new Set(cascadeData.stops.filter((stop) => stop.routeId === 'm-gate-friendship').map((stop) => stop.id));
+  cascadeData.routes = cascadeData.routes.filter((route) => route.id !== 'm-gate-friendship');
+  cascadeData.stops = cascadeData.stops.filter((stop) => stop.routeId !== 'm-gate-friendship');
+  cascadeData.geojson.features = cascadeData.geojson.features.filter((feature) => feature.properties?.routeId !== 'm-gate-friendship');
+  cascadeData.transfers = cascadeData.transfers.filter((transfer) => !removedStopIds.has(transfer.fromStopId) && !removedStopIds.has(transfer.toStopId));
+  response = await saveAdminDataset(beforeCascadeDelete, cascadeData, 'm-gate-friendship', 'Delete test route with linked transfer');
+  assert.equal(response.status, 200, 'route deletion atomically removes only linked stops, geometry, directions, and transfers');
+  const afterCascadeDelete = await (await fetch(`${base}/api/admin/dataset`, { headers })).json();
+  assert.equal(afterCascadeDelete.transfers.some((transfer) => transfer.id === 'test-m-gate-transfer'), false);
 
   response = await fetch(`${base}/api/admin/history/item?id=${'a'.repeat(40)}`, { headers });
   assert.equal(response.status, 503);

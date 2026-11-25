@@ -3,6 +3,7 @@ import { escapeHtml } from './ui/html.js';
 import { gatherRouteFormEdits, handleFareClassChange, loadFareClassForm } from './admin/routeFareClass.js';
 import { ensureHistoryPreviewContainer, renderSavedDataPreview, toggleSavedDataPreview } from './admin/historyPreview.js';
 import { createEditTracker, makeEditSnapshot, protectBeforeUnload, runUnsavedAction } from './admin/unsavedChanges.js';
+import { createRouteDraft as makeRouteDraft, removeRouteData } from './admin/routeManagement.js';
 
 const $ = (id) => document.getElementById(id);
 let dataset; let selectedId = null;
@@ -11,8 +12,8 @@ let editorBaseline = null;
 let pendingGuardedAction = null;
 let saveInProgress = false;
 const announce = (message, error = false) => { $('admin-status').textContent = message; $('admin-status').classList.toggle('error', error); };
-const auditFieldIds = ['audit-change', 'audit-reason', 'audit-source', 'audit-observation'];
-function auditValues() { return Object.fromEntries(auditFieldIds.map((id) => [id, $(id).value.trim()])); }
+const auditFieldIds = [];
+function auditValues() { return {}; }
 function setUnsavedIndicator(dirty, { dataDirty, auditDirty }) {
   const indicator = $('unsaved-indicator');
   indicator.hidden = !dirty;
@@ -40,46 +41,75 @@ async function api(url, options = {}) {
 const currentRoute = () => dataset?.routes.find((r) => r.id === selectedId);
 
 function showRoute() {
-  const route = currentRoute(); if (!route) return;
+  const route = currentRoute();
+  if (!route) {
+    $('route-form').hidden = true;
+    $('route-select').disabled = true;
+    $('route-summary').textContent = 'No Jeepneys yet. Add one to begin.';
+    $('open-tracer').hidden = true;
+    for (const id of auditFieldIds) $(id).value = '';
+    editorBaseline = null;
+    originalFareForm = null;
+    editTracker.setBaseline(null);
+    return;
+  }
+  $('route-form').hidden = false;
+  $('route-select').disabled = false;
+  $('open-tracer').hidden = false;
   $('route-name').value = route.name;
-  $('route-description').value = route.description ?? '';
+  const displayColor = /^#[0-9a-f]{6}$/i.test(route.displayColor ?? '') ? route.displayColor : '#808080';
+  $('route-color').value = displayColor;
+  $('route-color-text').value = displayColor;
+  $('route-active').value = String(route.active !== false);
   originalFareForm = loadFareClassForm(route, fareControls());
-  $('route-summary').textContent = `${route.jeepneyColorName} jeepney · Geometry: ${route.geometryStatus} · Fare class: ${route.fareClass ?? 'unknown'}`;
+  $('route-summary').textContent = `${route.active === false ? 'Inactive' : 'Active'} · Geometry: ${route.geometryStatus} · Fare class: ${route.fareClass ?? 'unknown'}`;
   $('open-tracer').href = `/trace.html?route=${encodeURIComponent(route.id)}`;
   const stops = dataset.stops.filter((s) => s.routeId === route.id);
-  $('stops-list').innerHTML = stops.map(renderStopRow).join('') || '<p class="admin-muted">No recorded stops for this route.</p>';
-  editorBaseline = { route: structuredClone(route), stops: structuredClone(stops), audit: auditValues() };
+  editorBaseline = { route: structuredClone(route), stops: structuredClone(stops), geoFeatures: structuredClone(dataset.geojson.features.filter((feature) => feature.properties?.routeId === route.id)), audit: auditValues() };
   editTracker.setBaseline(makeEditSnapshot(editorBaseline.route, editorBaseline.stops, editorBaseline.audit));
 }
-function renderStopRow(stop) {
-  return `<div class="stop-row" data-stop="${escapeHtml(stop.id)}"><label>Name<input data-field="name" value="${escapeHtml(stop.name)}" maxlength="160" required></label><label>Kind<select data-field="kind"><option value="terminal" ${stop.kind === 'terminal' ? 'selected' : ''}>Terminal</option><option value="boarding" ${stop.kind === 'boarding' ? 'selected' : ''}>Boarding / drop-off</option><option value="stop" ${stop.kind === 'stop' ? 'selected' : ''}>Intermediate stop</option></select></label><label>Longitude<input data-field="lng" type="number" step="any" value="${stop.coordinates[0] ?? ''}" required></label><label>Latitude<input data-field="lat" type="number" step="any" value="${stop.coordinates[1] ?? ''}" required></label><button class="admin-button secondary stop-delete" type="button" data-delete="${escapeHtml(stop.id)}">Remove stop</button></div>`;
-}
 function renderRoutes() {
-  $('route-select').innerHTML = dataset.routes.map((r) => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)} · ${escapeHtml(r.jeepneyColorName)}</option>`).join('');
+  $('route-select').innerHTML = dataset.routes.map((r) => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name || 'New Jeepney')}</option>`).join('');
   selectedId = selectedId && dataset.routes.some((r) => r.id === selectedId) ? selectedId : dataset.routes[0]?.id;
   $('route-select').value = selectedId; showRoute();
 }
-function audit() { return { change: $('audit-change').value.trim(), reason: $('audit-reason').value.trim(), source: $('audit-source').value.trim(), observation: $('audit-observation').value.trim(), date: new Date().toISOString().slice(0, 10) }; }
+function audit(action = 'save') {
+  const isNew = selectedId && !(dataset._originalRouteIds ?? []).includes(selectedId);
+  const routeName = currentRoute()?.name || 'Jeepney';
+  const change = action === 'delete' ? `Deleted Jeepney: ${routeName}` : isNew ? `Created Jeepney: ${routeName}` : `Updated Jeepney details: ${routeName}`;
+  const observation = action === 'delete'
+    ? 'The Jeepney and its linked stops, geometry, and transfers were removed together in this revision.'
+    : isNew
+      ? 'Created as a Jeepney record before route tracing. No route geometry or directions were invented.'
+      : 'Jeepney metadata was saved. Existing directions, stops, and route geometry were preserved.';
+  return { change, reason: 'Administrator saved changes through the private route management page.', source: 'Private route management', observation, date: new Date().toISOString().slice(0, 10) };
+}
 function fareControls() {
   return {
-    name: $('route-name'), description: $('route-description'), fareClass: $('fare-class'),
-    evidenceSource: $('fare-evidence-source'), evidenceMethod: $('fare-evidence-method'), evidenceDate: $('fare-evidence-date'),
+    name: $('route-name'), color: $('route-color'), colorText: $('route-color-text'), active: $('route-active'), fareClass: $('fare-class'),
   };
 }
 function collectRouteEdits() {
   const route = structuredClone(editorBaseline.route);
   const gathered = gatherRouteFormEdits({ route, controls: fareControls(), original: originalFareForm, stops: dataset.stops,
-    selectedId, stopRows: $('stops-list').querySelectorAll('.stop-row'), originalStops: dataset._originalStops || [] });
+    selectedId, originalStops: dataset._originalStops || [], metadataOnly: true });
   return gathered;
 }
 function refreshDirty() {
   if (!editorBaseline) return false;
   const gathered = collectRouteEdits();
-  const snapshot = makeEditSnapshot(gathered.route, gathered.stops.filter((stop) => stop.routeId === selectedId), auditValues());
+  const routeSnapshot = structuredClone(gathered.route);
+  if (!(dataset._originalRouteIds ?? []).includes(selectedId)) routeSnapshot.__newRoute = true;
+  const snapshot = makeEditSnapshot(routeSnapshot, gathered.stops.filter((stop) => stop.routeId === selectedId), auditValues());
   return editTracker.update(snapshot);
 }
 function gatherRouteEdits() {
   const gathered = collectRouteEdits();
+  const retainedDirectionIds = new Set(gathered.route.directions.map((direction) => direction.id));
+  const removedDirections = (editorBaseline.route.directions ?? []).filter((direction) => !retainedDirectionIds.has(direction.id));
+  const removedGeometryIds = new Set(removedDirections.map((direction) => direction.geometryId).filter(Boolean));
+  const removedDirectionIds = new Set(removedDirections.map((direction) => direction.id));
+  if (removedDirections.length) dataset.geojson.features = dataset.geojson.features.filter((feature) => feature.properties?.routeId !== selectedId || (!removedDirectionIds.has(feature.properties?.directionId) && !removedGeometryIds.has(feature.properties?.geometryId)));
   const index = dataset.routes.findIndex((route) => route.id === selectedId);
   dataset.routes[index] = gathered.route;
   dataset.stops = gathered.stops;
@@ -87,9 +117,18 @@ function gatherRouteEdits() {
 }
 function restoreSelectedBaseline() {
   if (!editorBaseline) return;
+  if (!(dataset._originalRouteIds ?? []).includes(selectedId)) {
+    dataset.routes = dataset.routes.filter((route) => route.id !== selectedId);
+    dataset.stops = dataset.stops.filter((stop) => stop.routeId !== selectedId);
+    dataset.routesFile.routes = dataset.routes;
+    selectedId = dataset.routes[0]?.id ?? null;
+    renderRoutes();
+    return;
+  }
   const index = dataset.routes.findIndex((route) => route.id === selectedId);
   dataset.routes[index] = structuredClone(editorBaseline.route);
   dataset.stops = dataset.stops.filter((stop) => stop.routeId !== selectedId).concat(structuredClone(editorBaseline.stops));
+  dataset.geojson.features = dataset.geojson.features.filter((feature) => feature.properties?.routeId !== selectedId).concat(structuredClone(editorBaseline.geoFeatures));
   dataset.routesFile.routes = dataset.routes;
   for (const id of auditFieldIds) $(id).value = editorBaseline.audit[id];
   showRoute();
@@ -111,8 +150,13 @@ async function saveCurrentRoute() {
   try {
     gatherRouteEdits();
     const result = await api('/api/admin/save', { method: 'POST', body: JSON.stringify({ data: dataset, editedRouteIds: [selectedId], expectedCommitSha: dataset.commitSha, audit: audit() }) });
-    announce(`Saved as revision ${result.revision.slice(0, 8)}; changed route details remain unverified.`);
-    await loadAll();
+    try { await loadAll(); }
+    catch (reloadError) {
+      announce(`Revision ${result.revision.slice(0, 8)} was saved, but the updated dataset could not be reloaded. Reload before editing or saving again. ${reloadError.message}`, true);
+      refreshDirty();
+      return false;
+    }
+    announce(`Saved as revision ${result.revision.slice(0, 8)}; changed geometry and affected stops remain unverified.`);
     return true;
   } catch (err) {
     announce(err.message, true);
@@ -164,9 +208,120 @@ async function restoreRevision(id) {
   try { const item = await api(`/api/admin/history/item?id=${encodeURIComponent(id)}`); const ok = confirm(`Revision ${new Date(item.createdAt).toLocaleString()}\n\n${item.audit?.change}\nReason: ${item.audit?.reason}\nSource: ${item.audit?.source}\n\nRestore this complete route dataset?`); if (!ok) return; const result = await api('/api/admin/restore', { method: 'POST', body: JSON.stringify({ id, expectedCommitSha: dataset.commitSha }) }); announce(`Restored previous data in revision ${result.revision.slice(0, 8)}; route geometry and directions remain unverified.`); await loadAll(); } catch (err) { announce(err.message, true); }
 }
 async function loadAll() {
-  dataset = await api('/api/admin/dataset'); dataset._originalStops = structuredClone(dataset.stops);
+  dataset = await api('/api/admin/dataset'); dataset._originalStops = structuredClone(dataset.stops); dataset._originalRouteIds = dataset.routes.map((route) => route.id);
   renderRoutes(); await Promise.all([loadHistory(), loadFeedback()]);
 }
+
+function createRouteDraft() {
+  const route = makeRouteDraft(`jeepney-${crypto.randomUUID()}`);
+  dataset.routes.push(route);
+  dataset.routesFile.routes = dataset.routes;
+  selectedId = route.id;
+  renderRoutes();
+  $('route-name').focus();
+  announce('New Jeepney draft created. Complete its details and save before tracing geometry.');
+}
+
+
+async function deleteEmptyRouteDraft(routeId = selectedId) {
+  const route = dataset.routes.find((item) => item.id === routeId);
+  if (!route) return;
+
+  const removal = removeRouteData(dataset, route.id);
+
+  if (!removal.ok) {
+    announce(
+      'This Jeepney is no longer available. Reload route data and try again.',
+      true
+    );
+    return;
+  }
+
+  const { directions, stops, features, transfers } = removal.impact;
+
+  const impact =
+    `${directions} direction${directions === 1 ? '' : 's'}, ` +
+    `${stops} stop${stops === 1 ? '' : 's'}, ` +
+    `${features} geometry feature${features === 1 ? '' : 's'}, and ` +
+    `${transfers} transfer${transfers === 1 ? '' : 's'}`;
+
+  const confirmed = confirm(
+    `Permanently delete “${route.name || 'New Jeepney'}” and its ${impact}? ` +
+    'Linked transfer records will also be removed; unrelated route records are preserved. ' +
+    'All removals are saved together in one revision. ' +
+    'This cannot be undone except by restoring a saved revision.'
+  );
+
+  if (!confirmed) return;
+
+  const isNew = !(dataset._originalRouteIds ?? []).includes(route.id);
+
+  // A new Jeepney draft has not been saved to the server yet.
+  if (isNew) {
+    dataset = removal.data;
+    dataset._originalStops = structuredClone(dataset.stops);
+    dataset._originalRouteIds = dataset.routes.map((item) => item.id);
+
+    selectedId = dataset.routes[0]?.id ?? null;
+
+    renderRoutes();
+    announce('Unsaved empty Jeepney draft deleted.');
+    return;
+  }
+
+  // Existing Jeepneys must be deleted through the authenticated save API.
+  const next = removal.data;
+
+  const lockedControls = [
+    ...$('route-form').elements,
+    $('route-select'),
+    $('reload'),
+    $('signout'),
+    $('add-route'),
+    $('delete-route'),
+  ];
+
+  if (saveInProgress) return;
+
+  // Remember each control's original state before disabling it.
+  const previousDisabled = lockedControls.map(
+    (control) => control.disabled
+  );
+
+  saveInProgress = true;
+  lockedControls.forEach((control) => {
+    control.disabled = true;
+  });
+
+  try {
+    const result = await api('/api/admin/save', {
+      method: 'POST',
+      body: JSON.stringify({
+        data: next,
+        editedRouteIds: [route.id],
+        expectedCommitSha: dataset.commitSha,
+        audit: audit('delete'),
+      }),
+    });
+
+    announce(
+      `Jeepney deleted in revision ${result.revision.slice(0, 8)}.`
+    );
+
+    selectedId = null;
+    await loadAll();
+  } catch (error) {
+    announce(error.message, true);
+  } finally {
+    // Restore the original disabled states instead of enabling everything.
+    lockedControls.forEach((control, index) => {
+      control.disabled = previousDisabled[index];
+    });
+
+    saveInProgress = false;
+  }
+}
+
 async function loadHistory() {
   try {
     const history = await api('/api/admin/history');
@@ -207,21 +362,18 @@ $('fare-class').addEventListener('change', () => {
 });
 $('route-form').addEventListener('input', refreshDirty);
 $('route-form').addEventListener('change', refreshDirty);
-$('stops-list').addEventListener('input', refreshDirty);
-$('stops-list').addEventListener('change', refreshDirty);
+$('route-color').addEventListener('input', () => { $('route-color-text').value = $('route-color').value; });
+$('route-color-text').addEventListener('input', () => {
+  if (/^#[0-9a-f]{6}$/i.test($('route-color-text').value)) $('route-color').value = $('route-color-text').value;
+});
 $('reload').addEventListener('click', () => guardAction(() => loadAll().then(() => announce('Route data reloaded.')).catch((e) => announce(e.message, true)), () => {}));
 $('signout').addEventListener('click', () => guardAction(async () => { await api('/auth/logout', { method: 'POST' }); location.reload(); }));
-$('add-stop').addEventListener('click', () => {
-  const id = `${selectedId}-stop-${crypto.randomUUID()}`;
-  if (!$('stops-list').querySelector('.stop-row')) $('stops-list').innerHTML = '';
-  $('stops-list').insertAdjacentHTML('beforeend', renderStopRow({ id, name: 'New stop', kind: 'boarding', coordinates: [null, null] }));
-  refreshDirty();
-});
-$('stops-list').addEventListener('click', (e) => {
-  const removeButton = e.target.closest('[data-delete]'); if (!removeButton) return;
-  removeButton.closest('.stop-row')?.remove();
-  if (!$('stops-list').querySelector('.stop-row')) $('stops-list').innerHTML = '<p class="admin-muted">No recorded stops for this route.</p>';
-  refreshDirty();
+$('add-route').addEventListener('click', () => guardAction(createRouteDraft));
+
+$('delete-route').addEventListener('click', () => {
+  if (saveInProgress) return;
+
+  deleteEmptyRouteDraft(selectedId);
 });
 $('route-form').addEventListener('submit', async (e) => {
   e.preventDefault();

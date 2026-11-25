@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  emptyLine, lineFromCoords, pathOf, linesToGeoJson, geojsonToLines, lineKey, analyzeLine, lengthKm, validateDraftExport, geometryIdFor,
+  emptyLine, lineFromCoords, pathOf, linesToGeoJson, geojsonToLines, lineKey, analyzeLine, lengthKm, validateDraftExport, geometryIdFor, insertWaypoint,
 } from '../src/trace/geojson.js';
 import { validateDataset } from '../src/data/validate.js';
 import { planTrip, PLAN_STATUS } from '../src/routing/planner.js';
+import { renderRoutePreview } from '../src/trace/preview.js';
 
 const routes = JSON.parse(readFileSync(new URL('../public/data/routes.json', import.meta.url), 'utf8')).routes;
 const line3 = [[0, 0], [0.001, 0.0005], [0.002, 0.002]];
@@ -14,6 +15,38 @@ const snappedLine = () => ({
   waypoints: [[0, 0], [0.002, 0.002]],
   segments: [[[0, 0], [0.001, 0.0002], [0.0015, 0.001], [0.002, 0.002]]],
   oneWay: true, startName: 'Terminal X', endName: 'Mall Y',
+});
+
+test('selected map editing inserts a vertex between existing waypoints and rebuilds only adjacent segments', async () => {
+  const line = lineFromCoords([[120, 15], [120.02, 15], [120.04, 15]]);
+  const unrelated = structuredClone(line.segments[1]);
+  await insertWaypoint(line, 1, [120.01, 15], async (a, b) => [a, b]);
+  assert.deepEqual(line.waypoints, [[120, 15], [120.01, 15], [120.02, 15], [120.04, 15]]);
+  assert.deepEqual(line.segments[2], unrelated, 'the non-adjacent segment remains unchanged');
+  assert.deepEqual(pathOf(line), line.waypoints);
+});
+
+test('route geometry insertion rejects malformed coordinates and invalid indices without altering the line', async () => {
+  const line = lineFromCoords([[120, 15], [120.02, 15]]);
+  const before = structuredClone(line);
+  await assert.rejects(insertWaypoint(line, 1, [999, 15], async (a, b) => [a, b]), /Invalid route vertex insertion/);
+  await assert.rejects(insertWaypoint(line, 4, [120.01, 15], async (a, b) => [a, b]), /Invalid route vertex insertion/);
+  assert.deepEqual(line, before);
+});
+
+test('tracer preview renders the unsaved route, direction geometry, and ordered stops safely', () => {
+  const html = renderRoutePreview({
+    route: { name: '<New Jeepney>', jeepneyColorName: 'Silver', displayColor: '#667788', description: '<script>x</script>', startPoint: 'Angeles', destination: 'San Fernando', via: 'Town', active: true },
+    directions: [{ label: 'Outbound', startPoint: 'Angeles', destination: 'San Fernando', via: '', active: true, geometryPointCount: 4, geometryLengthKm: 12.34, stops: [{ name: '<Terminal>', kind: 'terminal', geometryPosition: '120, 15' }], unlistedStops: [] }],
+  });
+  assert.match(html, /Unsaved draft preview/);
+  assert.match(html, /&lt;New Jeepney&gt;/);
+  assert.match(html, /&lt;script&gt;x&lt;\/script&gt;/);
+  assert.match(html, /12\.34 km \(draft\)/);
+  assert.match(html, /&lt;Terminal&gt;/);
+  assert.match(html, /Angeles/);
+  assert.match(html, /San Fernando/);
+  assert.doesNotMatch(html, /<script>/);
 });
 
 test('pathOf joins segments without duplicating the shared point', () => {
@@ -35,6 +68,76 @@ test('export writes one feature per direction with direction, oneWay and termina
   assert.equal(a.geometry.coordinates.length, 4); // the snapped path, not just the two clicks
   assert.equal(b.properties.direction, 'b');
   assert.notEqual(a.properties.geometryId, b.properties.geometryId);
+});
+
+test('tracer imports and exports independently identified direction records beyond legacy a/b', () => {
+  const route = { id: 'dynamic-route', name: 'Dynamic route', sourceLabel: 'Dynamic test', jeepneyColorName: 'Slate', displayColor: '#667788', geometryStatus: 'unverified', directions: [
+    { id: 'dynamic-out', label: 'Angeles to San Fernando', geometryId: 'dynamic-out-geometry', verificationStatus: 'unverified', orderedStopIds: [] },
+    { id: 'dynamic-via-market', label: 'Via market', verificationStatus: 'unverified', orderedStopIds: [] },
+    { id: 'dynamic-return', label: 'San Fernando to Angeles', verificationStatus: 'unverified', orderedStopIds: [] },
+  ] };
+  const lines = new Map(route.directions.map((direction, index) => [lineKey(route.id, direction.id), lineFromCoords([[120, 15], [120 + (index + 1) * 0.01, 15]])]));
+  const exported = linesToGeoJson(lines, [route]);
+  assert.deepEqual(exported.features.map((feature) => feature.properties.directionId), route.directions.map((direction) => direction.id));
+  assert.equal(exported.features[0].properties.geometryId, 'dynamic-out-geometry');
+  const imported = geojsonToLines(exported, [route]);
+  for (const direction of route.directions) assert.deepEqual(imported.get(lineKey(route.id, direction.id)).waypoints, lines.get(lineKey(route.id, direction.id)).waypoints);
+});
+
+
+test('tracer refuses MultiLineString geometry instead of flattening disconnected parts', () => {
+  const multipart = {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      properties: { routeId: 'x', direction: 'a', geometryId: 'x-a' },
+      geometry: { type: 'MultiLineString', coordinates: [line3, [[120.1, 15.1], [120.2, 15.2]]] },
+    }],
+  };
+  assert.throws(() => geojsonToLines(multipart), /Cannot edit multipart geometry.*separate line parts were preserved/);
+});
+
+test('tracer refuses explicit geometry references that cannot be resolved to a direction', () => {
+  const route = { id: 'dynamic-route', directions: [
+    { id: 'dynamic-out', geometryId: 'dynamic-out-geometry' },
+    { id: 'dynamic-return' },
+  ] };
+  const feature = (directionId, geometryId = 'dynamic-out-geometry') => ({
+    type: 'Feature',
+    properties: { routeId: route.id, directionId, geometryId, direction: 'a' },
+    geometry: { type: 'LineString', coordinates: line3 },
+  });
+  assert.throws(
+    () => geojsonToLines({ type: 'FeatureCollection', features: [feature('missing-direction')] }, [route]),
+    /references unknown direction/,
+  );
+  assert.throws(
+    () => geojsonToLines({ type: 'FeatureCollection', features: [feature('dynamic-return')] }, [route]),
+    /conflicting direction and geometry references/,
+  );
+});
+
+test('tracer preserves a valid legacy a/b feature beside partially explicit direction metadata', () => {
+  const route = { id: 'partial-route', directions: [{ id: 'partial-route-a', geometryId: 'partial-a-geometry' }] };
+  const geo = { type: 'FeatureCollection', features: [{
+    type: 'Feature',
+    properties: { routeId: 'partial-route', directionId: 'partial-route-b', direction: 'b', geometryId: 'partial-b-geometry' },
+    geometry: { type: 'LineString', coordinates: line3 },
+  }] };
+  const imported = geojsonToLines(geo, [route]);
+  assert.deepEqual(imported.get(lineKey('partial-route', 'b')).waypoints, line3);
+});
+
+test('tracer refuses multiple features for one direction rather than joining them with an invented segment', () => {
+  const feature = (coordinates) => ({
+    type: 'Feature',
+    properties: { routeId: 'x', direction: 'a' },
+    geometry: { type: 'LineString', coordinates },
+  });
+  assert.throws(
+    () => geojsonToLines({ type: 'FeatureCollection', features: [feature(line3), feature([[120.1, 15.1], [120.2, 15.2]])] }),
+    /More than one geometry feature maps/,
+  );
 });
 
 test('single-point and empty lines are not exported; exports validate', () => {

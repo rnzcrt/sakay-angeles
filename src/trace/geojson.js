@@ -1,6 +1,7 @@
 // Pure helpers for the route tracer (testable in Node).
 //
-// Model: a route can have up to two traced DIRECTION lines, 'a' and 'b'.
+// Lines are keyed by stable direction id. Legacy route records without direction
+// records retain the familiar 'a' and 'b' tracing controls.
 // A line stores the points the contributor clicked (`waypoints`) and the path
 // between each consecutive pair (`segments`, one per gap — a straight line or a
 // road-snapped path). `oneWay: true` means the jeepney only travels in the
@@ -10,7 +11,10 @@ import { isValidLngLat, haversineMeters, pathLengthMeters } from '../routing/geo
 import { validateDataset } from '../data/validate.js';
 
 export const DIRECTIONS = ['a', 'b'];
-export const directionLabel = (d) => (d === 'b' ? 'Route 2 (coming back)' : 'Route 1 (going)');
+export const routeDirections = (route) => Array.isArray(route?.directions) && route.directions.length
+  ? route.directions.map((direction) => ({ ...direction, id: direction.id, label: direction.label || direction.id }))
+  : [{ id: 'a', label: 'Route 1 (going)' }, { id: 'b', label: 'Route 2 (coming back)' }];
+export const directionLabel = (d, route) => routeDirections(route).find((direction) => direction.id === d)?.label ?? (d === 'b' ? 'Route 2 (coming back)' : d === 'a' ? 'Route 1 (going)' : d);
 export const lineKey = (routeId, dir) => `${routeId}|${dir}`;
 export const splitKey = (key) => { const i = key.lastIndexOf('|'); return [key.slice(0, i), key.slice(i + 1)]; };
 export const geometryIdFor = (routeId, dir) => `${routeId}-${dir}-draft`;
@@ -25,6 +29,28 @@ export function pathOf(line) {
   return out;
 }
 
+/** Insert a traced vertex at a waypoint index and rebuild only adjacent segments. */
+export async function insertWaypoint(line, index, point, makeSegment) {
+  if (!line || !Array.isArray(line.waypoints) || !Array.isArray(line.segments) || !isValidLngLat(point) ||
+      !Number.isInteger(index) || index < 0 || index > line.waypoints.length || typeof makeSegment !== 'function') {
+    throw new TypeError('Invalid route vertex insertion.');
+  }
+  const coordinate = [point[0], point[1]];
+  const before = line.waypoints[index - 1];
+  const after = line.waypoints[index];
+  if (before && after) {
+    const left = await makeSegment(before, coordinate);
+    const right = await makeSegment(coordinate, after);
+    line.segments.splice(index - 1, 1, left, right);
+  } else if (before) {
+    line.segments.push(await makeSegment(before, coordinate));
+  } else if (after) {
+    line.segments.unshift(await makeSegment(coordinate, after));
+  }
+  line.waypoints.splice(index, 0, coordinate);
+  return line;
+}
+
 const straight = (coords) => coords.slice(1).map((c, i) => [coords[i], c]);
 
 /** Line built from a plain coordinate list (legacy files / imports). */
@@ -33,16 +59,54 @@ export function lineFromCoords(coords, { oneWay = false, startName = '', endName
   return { waypoints: clean, segments: straight(clean), oneWay, startName, endName };
 }
 
-/** Map<lineKey, line> from a FeatureCollection. Features without a direction are legacy two-way lines. */
-export function geojsonToLines(geojson) {
+/** Map<lineKey, line> from a FeatureCollection. Multipart geometry is deliberately rejected:
+ * the editor stores one continuous path per direction and must never connect separate parts.
+ */
+export function geojsonToLines(geojson, routes = []) {
   const lines = new Map();
-  for (const f of geojson?.features ?? []) {
+  for (const [index, f] of (geojson?.features ?? []).entries()) {
     const p = f?.properties ?? {};
     const routeId = p.routeId;
     const g = f?.geometry;
-    const coords = g?.type === 'LineString' ? g.coordinates : g?.type === 'MultiLineString' ? g.coordinates.flat() : null;
+    if (g?.type === 'MultiLineString') {
+      const identity = p.geometryId || p.directionId || routeId || `feature ${index + 1}`;
+      throw new Error(`Cannot edit multipart geometry "${identity}" yet. Its separate line parts were preserved; convert or edit it with a multipart-aware tool before importing.`);
+    }
+    const coords = g?.type === 'LineString' ? g.coordinates : null;
     if (!routeId || !coords) continue;
-    const dir = p.direction === 'b' ? 'b' : 'a';
+    const route = routes.find((item) => item.id === routeId);
+    const explicitDirections = Array.isArray(route?.directions) && route.directions.length > 0;
+    let dir;
+    if (explicitDirections) {
+      const byId = p.directionId === undefined
+        ? undefined
+        : route.directions.find((direction) => direction.id === p.directionId);
+      const byGeometry = p.geometryId === undefined
+        ? undefined
+        : route.directions.find((direction) => direction.geometryId === p.geometryId);
+      const legacyDir = ['a', 'b'].includes(p.direction) ? p.direction : null;
+      const exactLegacyReference = legacyDir && p.directionId === `${routeId}-${legacyDir}`;
+      if (p.directionId !== undefined && !byId && !exactLegacyReference) {
+        throw new Error(`Geometry for "${routeId}" references unknown direction "${p.directionId}". It was not imported.`);
+      }
+      if (byId && byGeometry && byId.id !== byGeometry.id) {
+        throw new Error(`Geometry for "${routeId}" has conflicting direction and geometry references. It was not imported.`);
+      }
+      if (byId?.geometryId && p.geometryId !== byId.geometryId) {
+        throw new Error(`Geometry for direction "${byId.id}" does not match its stored geometry reference. It was not imported.`);
+      }
+      const metadataDirection = byId ?? byGeometry;
+      if (metadataDirection) dir = metadataDirection.id;
+      else if (exactLegacyReference || (p.directionId === undefined && p.geometryId === undefined && legacyDir)) dir = legacyDir;
+      else {
+        throw new Error(`Geometry for "${routeId}" does not identify one of its configured directions. It was not imported.`);
+      }
+    } else {
+      dir = p.direction === 'b' ? 'b' : 'a';
+      if (p.directionId !== undefined && p.directionId !== `${routeId}-${dir}`) {
+        throw new Error(`Legacy geometry for "${routeId}" references an unexpected direction "${p.directionId}". It was not imported.`);
+      }
+    }
     const key = lineKey(routeId, dir);
     const incoming = lineFromCoords(coords, {
       oneWay: p.oneWay === true,
@@ -51,10 +115,9 @@ export function geojsonToLines(geojson) {
     });
     if (!incoming.waypoints.length) continue;
     if (lines.has(key)) {
-      const prev = lines.get(key);
-      prev.waypoints.push(...incoming.waypoints);
-      prev.segments = straight(prev.waypoints);
-    } else lines.set(key, incoming);
+      throw new Error(`More than one geometry feature maps to "${routeId}" direction "${dir}". The editor cannot safely combine separate features.`);
+    }
+    lines.set(key, incoming);
   }
   return lines;
 }
@@ -65,15 +128,16 @@ const round = (n) => Math.round(n * 1e6) / 1e6; // ~0.1 m
 export function linesToGeoJson(lines, routes) {
   const features = [];
   for (const r of routes) {
-    for (const dir of DIRECTIONS) {
+    for (const direction of routeDirections(r)) {
+      const dir = direction.id;
       const line = lines.get(lineKey(r.id, dir));
       if (!line) continue;
       const path = pathOf(line);
       if (path.length < 2) continue;
       const properties = {
         routeId: r.id,
-        directionId: `${r.id}-${dir}`,
-        geometryId: geometryIdFor(r.id, dir),
+        directionId: direction.id === 'a' || direction.id === 'b' ? `${r.id}-${dir}` : direction.id,
+        geometryId: direction.geometryId || geometryIdFor(r.id, dir),
         direction: dir,
         oneWay: Boolean(line.oneWay),
         draft: true,
@@ -134,8 +198,8 @@ export function analyzeLine(coords, { stepM = 40, nearM = 35, minGapM = 300 } = 
 }
 
 /** Validate an export against the route list before the user saves it. */
-export function validateDraftExport(geojson, routes) {
-  return validateDataset({ routes, stops: [], transfers: [], geojson });
+export function validateDraftExport(geojson, routes, stops = []) {
+  return validateDataset({ routes, stops, transfers: [], geojson });
 }
 
 /**

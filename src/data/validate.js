@@ -76,7 +76,24 @@ export function validateGeoJson(geojson, errors = []) {
       else ids.add(gid);
     }
   });
+  if (geojson.features.length > 5000) errors.push(err('malformed_geojson', 'GeoJSON exceeds the 5,000-feature limit.', 'geojson.features'));
+  let positions = 0;
+  for (const feature of geojson.features) {
+    const coordinates = feature?.geometry?.coordinates;
+    if (feature?.geometry?.type === 'LineString' && Array.isArray(coordinates)) positions += coordinates.length;
+    if (feature?.geometry?.type === 'MultiLineString' && Array.isArray(coordinates)) positions += coordinates.reduce((sum, line) => sum + (Array.isArray(line) ? line.length : 0), 0);
+    if (positions > 100_000) break;
+  }
+  if (positions > 100_000) errors.push(err('malformed_geojson', 'GeoJSON exceeds the 100,000-position limit.', 'geojson.features'));
   return errors;
+}
+
+function optionalText(record, fields, path, errors) {
+  for (const [field, max] of Object.entries(fields)) {
+    if (record[field] !== undefined && (typeof record[field] !== 'string' || record[field].length > max)) {
+      errors.push(err('malformed_record', `${field} must be text no longer than ${max} characters.`, `${path}.${field}`));
+    }
+  }
 }
 
 /**
@@ -138,6 +155,7 @@ export function validateDataset(dataset) {
   // --- routes & directions ---
   const routeIds = new Set();
   const directionIds = new Set();
+  const directionOwners = new Map();
   routes.forEach((r, i) => {
     const path = `routes[${i}]`;
     if (!isObject(r) || !isNonEmptyString(r.id)) {
@@ -155,10 +173,14 @@ export function validateDataset(dataset) {
     if (!VERIFICATION_STATUSES.includes(r.geometryStatus)) {
       errors.push(err('invalid_status', `Route "${r.id}" has invalid geometryStatus.`, `${path}.geometryStatus`));
     }
+    if (r.active !== undefined && typeof r.active !== 'boolean') {
+      errors.push(err('malformed_route', `Route "${r.id}" active must be a boolean when present.`, `${path}.active`));
+    }
+    optionalText(r, { name: 180, sourceLabel: 180, sourceSubLabel: 180, jeepneyColorName: 80, description: 1200, startPoint: 180, destination: 180, via: 500 }, path, errors);
     if (r.fareClass !== undefined && r.fareClass !== null && !['traditional', 'modern'].includes(r.fareClass)) {
       errors.push(err('invalid_fare_class', `Route "${r.id}" fareClass must be traditional, modern, or null when unknown.`, `${path}.fareClass`));
     }
-    if (r.fareClass !== undefined && r.fareClass !== null) {
+    if (r.fareClassEvidence !== undefined) {
       validateEvidence(r.fareClassEvidence, `${path}.fareClassEvidence`, errors);
     }
     if (r.geometryStatus === 'verified') {
@@ -176,20 +198,33 @@ export function validateDataset(dataset) {
       }
       if (directionIds.has(d.id)) errors.push(err('duplicate_id', `Duplicate direction id "${d.id}".`, `${dpath}.id`));
       directionIds.add(d.id);
+      directionOwners.set(d.id, r.id);
+      optionalText(d, { label: 180, startPoint: 180, destination: 180, via: 500, description: 1200 }, dpath, errors);
       if (!VERIFICATION_STATUSES.includes(d.verificationStatus)) {
         errors.push(err('invalid_status', `Direction "${d.id}" has invalid verificationStatus.`, `${dpath}.verificationStatus`));
+      }
+      if (d.active !== undefined && typeof d.active !== 'boolean') {
+        errors.push(err('malformed_direction', `Direction "${d.id}" active must be a boolean when present.`, `${dpath}.active`));
       }
       if (d.verificationStatus === 'verified') validateEvidence(d.evidence, `${dpath}.evidence`, errors);
       if (!Array.isArray(d.orderedStopIds)) {
         errors.push(err('malformed_direction', `Direction "${d.id}" needs orderedStopIds.`, `${dpath}.orderedStopIds`));
         return;
       }
+      const orderedStopSet = new Set();
       d.orderedStopIds.forEach((sid, k) => {
         if (!stopsById.has(sid)) {
           errors.push(err('broken_reference', `Direction "${d.id}" references unknown stop "${sid}".`, `${dpath}.orderedStopIds[${k}]`));
+        } else if (stopsById.get(sid).routeId !== undefined && stopsById.get(sid).routeId !== r.id) {
+          errors.push(err('broken_reference', `Direction "${d.id}" references a stop belonging to another Jeepney.`, `${dpath}.orderedStopIds[${k}]`));
         }
-        if (k > 0 && d.orderedStopIds[k - 1] === sid) {
-          errors.push(err('malformed_direction', `Direction "${d.id}" lists stop "${sid}" twice in a row.`, `${dpath}.orderedStopIds[${k}]`));
+        if (orderedStopSet.has(sid)) {
+          errors.push(err('malformed_direction', `Direction "${d.id}" lists stop "${sid}" more than once.`, `${dpath}.orderedStopIds[${k}]`));
+        }
+        orderedStopSet.add(sid);
+        const stop = stopsById.get(sid);
+        if (stop?.directionId && stop.directionId !== d.id) {
+          errors.push(err('broken_reference', `Direction "${d.id}" includes stop "${sid}" assigned to another direction.`, `${dpath}.orderedStopIds[${k}]`));
         }
       });
       if (d.geometryId !== undefined && geometryChecked) {
@@ -219,12 +254,60 @@ export function validateDataset(dataset) {
     });
   });
 
+  stops.forEach((stop, i) => {
+    if (stop?.directionId === undefined) return;
+    const directionPath = `stops[${i}].directionId`;
+    if (!isNonEmptyString(stop.directionId) || !directionOwners.has(stop.directionId)) {
+      errors.push(err('broken_reference', `Stop "${stop.id}" references an unknown direction.`, directionPath));
+    } else if (stop.routeId !== undefined && directionOwners.get(stop.directionId) !== stop.routeId) {
+      errors.push(err('broken_reference', `Stop "${stop.id}" references a direction from another Jeepney.`, directionPath));
+    } else {
+      const direction = routes.flatMap((route) => Array.isArray(route?.directions) ? route.directions : []).find((item) => item?.id === stop.directionId);
+      if (!Array.isArray(direction?.orderedStopIds) || !direction.orderedStopIds.includes(stop.id)) {
+        errors.push(err('broken_reference', `Stop "${stop.id}" is not listed in its assigned direction's ordered stops.`, directionPath));
+      }
+    }
+  });
+
   // geometry features must point at known routes
   if (geometryChecked && Array.isArray(geojson.features)) {
     geojson.features.forEach((f, i) => {
       const rid = f?.properties?.routeId;
       if (isNonEmptyString(rid) && !routeIds.has(rid)) {
         errors.push(err('broken_reference', `Geometry references unknown route "${rid}".`, `geojson.features[${i}].properties.routeId`));
+        return;
+      }
+      const props = f?.properties;
+      if (!isObject(props)) return;
+      const route = routes.find((item) => item?.id === rid);
+      const directions = route?.directions ?? [];
+      if (!directions.length) {
+        if (props.directionId === undefined) return; // legacy geometry without explicit direction metadata
+        const legacyDirection = ['a', 'b'].includes(props.direction) && props.directionId === `${rid}-${props.direction}`;
+        if (!legacyDirection) {
+          errors.push(err('broken_reference', `Legacy geometry references unknown direction "${props.directionId}".`, `geojson.features[${i}].properties.directionId`));
+        }
+        return;
+      }
+      const idMatch = props.directionId === undefined
+        ? undefined
+        : directions.find((direction) => direction.id === props.directionId);
+      const geometryMatch = props.geometryId === undefined
+        ? undefined
+        : directions.find((direction) => direction.geometryId === props.geometryId);
+      const legacyDirection = ['a', 'b'].includes(props.direction) && props.directionId === `${rid}-${props.direction}`;
+      const legacyWithoutRefs = props.directionId === undefined && props.geometryId === undefined;
+      const allowLegacy = !idMatch && !geometryMatch && (legacyDirection || legacyWithoutRefs);
+      const invalidDirectionId = props.directionId !== undefined && !idMatch && !legacyDirection;
+      const conflictingReferences = idMatch && geometryMatch && idMatch.id !== geometryMatch.id;
+      const mismatchedStoredGeometry = idMatch?.geometryId && props.geometryId !== idMatch.geometryId;
+      const unresolvedGeometry = !idMatch && !geometryMatch && !allowLegacy;
+      if (invalidDirectionId || conflictingReferences || mismatchedStoredGeometry || unresolvedGeometry) {
+        errors.push(err(
+          'broken_reference',
+          `Geometry references a missing or conflicting direction/geometry association for route "${rid}".`,
+          `geojson.features[${i}].properties.directionId`,
+        ));
       }
     });
   }

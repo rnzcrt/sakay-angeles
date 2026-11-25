@@ -85,8 +85,9 @@ test('the Admin page provides the simplified create, save, trace, and delete wor
   assert.match(admin, /\$\('add-route'\)\.addEventListener\('click',[\s\S]*?createRouteDraft/);
   assert.match(admin, /removeRouteData\(dataset, route\.id\)/);
   assert.match(html, /id="add-route"[\s\S]*?>\s*Add Jeepney\s*<\/button>/);
-  assert.match(html, /id="route-color-text"[^>]*pattern="#\[0-9a-fA-F\]\{6\}"/);
-  assert.match(admin, /\$\('route-color-text'\)\.addEventListener\('input'/);
+  assert.match(html, /id="route-color-name"[^>]*placeholder="e\.g\. Purple"/);
+  assert.match(html, /id="route-color"[^>]*type="color"/);
+  assert.match(admin, /colorName: \$\('route-color-name'\)/);
   assert.match(html, /id="save-route"[^>]*>[\s\S]*?Save Jeepney/);
   assert.match(html, /id="open-tracer"[^>]*>[\s\S]*?Open Road Tracer/);
   assert.doesNotMatch(html, /Starting point|Destination|Via \(optional\)|Fare classification evidence|Change record|<h3>Directions/);

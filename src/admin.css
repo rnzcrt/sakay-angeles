@@ -45,7 +45,8 @@
 .route-form-actions .save-button { min-width:190px; }
 .route-form-actions .delete-button { min-width:170px; }
 .color-field { align-items:stretch; }
-.color-field label:last-child { flex:0 0 82px; }
+.color-field label:first-child { flex:1 1 220px; }
+.color-field label:last-child { flex:0 0 180px; }
 
 @media (max-width: 520px) {
   .route-form-actions {
@@ -58,5 +59,5 @@
   }
 
   .route-form-actions .danger { margin-left:0; }
-  .color-field label:last-child { flex:1 1 100%; }
+  .color-field label { flex:1 1 100% !important; }
 }

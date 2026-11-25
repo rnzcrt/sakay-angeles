@@ -61,7 +61,7 @@ test('all 11 legend routes remain alongside the geometry-free owner draft', () =
   assert.equal(routesFile.routes.length, 12);
   assert.equal(legendRoutes.length, 11);
   const colors = legendRoutes.map((r) => r.jeepneyColorName).sort();
-  assert.deepEqual(colors, ['Blue', 'Green', 'Grey', 'Lavender', 'Maroon', 'Orange', 'Pink', 'Sand', 'Steel', 'White', 'Yellow']);
+  assert.deepEqual(colors, ['Blue', 'Green', 'Grey', 'Maroon', 'Orange', 'Pink', 'Purple', 'Sand', 'Steel', 'White', 'Yellow']);
   for (const r of legendRoutes) {
     assert.ok(r.sourceLabel && r.name && /^#[0-9A-Fa-f]{6}$/.test(r.displayColor), r.id);
     assert.equal(r.geometryStatus, 'unverified', `${r.id} must stay unverified until digitized`);

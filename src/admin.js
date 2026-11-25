@@ -59,7 +59,7 @@ function showRoute() {
   $('route-name').value = route.name;
   const displayColor = /^#[0-9a-f]{6}$/i.test(route.displayColor ?? '') ? route.displayColor : '#808080';
   $('route-color').value = displayColor;
-  $('route-color-text').value = displayColor;
+  $('route-color-name').value = route.jeepneyColorName ?? '';
   $('route-active').value = String(route.active !== false);
   originalFareForm = loadFareClassForm(route, fareControls());
   $('route-summary').textContent = `${route.active === false ? 'Inactive' : 'Active'} · Geometry: ${route.geometryStatus} · Fare class: ${route.fareClass ?? 'unknown'}`;
@@ -86,7 +86,7 @@ function audit(action = 'save') {
 }
 function fareControls() {
   return {
-    name: $('route-name'), color: $('route-color'), colorText: $('route-color-text'), active: $('route-active'), fareClass: $('fare-class'),
+    name: $('route-name'), colorName: $('route-color-name'), color: $('route-color'), active: $('route-active'), fareClass: $('fare-class'),
   };
 }
 function collectRouteEdits() {
@@ -362,10 +362,6 @@ $('fare-class').addEventListener('change', () => {
 });
 $('route-form').addEventListener('input', refreshDirty);
 $('route-form').addEventListener('change', refreshDirty);
-$('route-color').addEventListener('input', () => { $('route-color-text').value = $('route-color').value; });
-$('route-color-text').addEventListener('input', () => {
-  if (/^#[0-9a-f]{6}$/i.test($('route-color-text').value)) $('route-color').value = $('route-color-text').value;
-});
 $('reload').addEventListener('click', () => guardAction(() => loadAll().then(() => announce('Route data reloaded.')).catch((e) => announce(e.message, true)), () => {}));
 $('signout').addEventListener('click', () => guardAction(async () => { await api('/auth/logout', { method: 'POST' }); location.reload(); }));
 $('add-route').addEventListener('click', () => guardAction(createRouteDraft));

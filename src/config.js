@@ -3,7 +3,11 @@
 export const MAP_CONFIG = {
   // OpenFreeMap public style. The public service is provided as-is and may
   // change or be discontinued; see README before any high-traffic launch.
-  styleUrl: 'https://tiles.openfreemap.org/styles/liberty',
+  styleUrls: {
+    positron: 'https://tiles.openfreemap.org/styles/positron',
+    fiord: 'https://tiles.openfreemap.org/styles/fiord',
+  },
+  defaultStyle: 'positron',
   // Attribution is added automatically by MapLibre from the style. This text
   // is repeated in the page footer so it stays visible even if tiles fail.
   attributionText: 'Map: OpenFreeMap © OpenMapTiles · Data from OpenStreetMap',

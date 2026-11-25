@@ -195,6 +195,23 @@ test('public route detail shows community testing and a route-specific feedback 
   assert.doesNotMatch(html, /Unverified secondary source/);
 });
 
+test('public route detail displays dynamic direction metadata with HTML escaping and omits inactive directions', () => {
+  const html = renderRouteDetail({ ...real[0], directions: [
+    { id: 'outbound', label: '<Angeles to San Fernando>', startPoint: 'Angeles', destination: 'San Fernando', via: 'Town', description: 'Daily service', orderedStopIds: ['stop-b', 'stop-a'] },
+    { id: 'inactive', label: 'Private direction', active: false, startPoint: 'Hidden', destination: 'Hidden' },
+  ] }, { stops: [
+    { id: 'stop-a', directionId: 'outbound', name: 'First recorded stop', verificationStatus: 'unverified' },
+    { id: 'stop-b', directionId: 'outbound', name: '<Second stop>', verificationStatus: 'verified' },
+  ] });
+  assert.match(html, /&lt;Angeles to San Fernando&gt;/);
+  assert.match(html, /Angeles → San Fernando/);
+  assert.match(html, /via Town/);
+  assert.ok(html.indexOf('&lt;Second stop&gt;') < html.indexOf('First recorded stop'), 'recorded stops follow the direction order');
+  assert.match(html, /unverified/);
+  assert.doesNotMatch(html, /Private direction|Hidden/);
+  assert.doesNotMatch(html, /<Second stop>/);
+});
+
 test('geocode choices flag results outside the service area', () => {
   const html = renderGeocodeChoices('origin', [{ label: 'Somewhere', inServiceArea: false }, { label: 'Else', inServiceArea: true }]);
   assert.match(html, /outside Angeles–Clark area/);

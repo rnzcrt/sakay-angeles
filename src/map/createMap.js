@@ -8,7 +8,7 @@ maplibregl.setWorkerUrl(workerUrl);
  * Creates the map. Returns { map } or { error } (e.g. WebGL unavailable).
  * `onProblem(message)` is called when the style/tiles fail to load.
  */
-export function createMap(container, onProblem, { offline = false } = {}) {
+export function createMap(container, onProblem, { offline = false, styleUrl = MAP_CONFIG.styleUrls[MAP_CONFIG.defaultStyle] } = {}) {
   let map;
   const panelToggle = document.getElementById('mobile-panel-toggle');
   const layout = panelToggle?.closest('.layout');
@@ -37,7 +37,7 @@ export function createMap(container, onProblem, { offline = false } = {}) {
       // `offline` uses a blank style (no network) — handy for testing and tile outages.
       style: offline
         ? { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#e8ece6' } }] }
-        : MAP_CONFIG.styleUrl,
+        : styleUrl,
       center: MAP_CONFIG.initialCenter,
       zoom: MAP_CONFIG.initialZoom,
       maxZoom: MAP_CONFIG.maxZoom,

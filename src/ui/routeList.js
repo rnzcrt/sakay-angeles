@@ -10,7 +10,13 @@ export function routeHasGeometry(route, geojson) {
 }
 
 function setRouteListExpanded(list, button, expanded) {
-  list.hidden = !expanded;
+  if (list.classList) {
+    list.hidden = false;
+    list.classList.toggle('is-collapsed', !expanded);
+    list.inert = !expanded;
+  } else {
+    list.hidden = !expanded;
+  }
   button.textContent = expanded ? 'Collapse routes' : 'Expand routes';
   button.setAttribute('aria-expanded', String(expanded));
 }
@@ -52,8 +58,16 @@ export function renderRouteItem(route, { selected = false, visible = true, hasGe
 </li>`;
 }
 
-export function renderRouteDetail(route, { hasGeometry = false } = {}) {
+export function renderRouteDetail(route, { hasGeometry = false, stops = [] } = {}) {
   const landmarks = (route.sourceLandmarks ?? []).map(escapeHtml).join(' · ');
+  const directions = (route.directions ?? []).filter((direction) => direction.active !== false).map((direction) => {
+    const endpoints = [direction.startPoint, direction.destination].filter(Boolean).map(escapeHtml).join(' → ');
+    const via = direction.via ? ` · via ${escapeHtml(direction.via)}` : '';
+    const description = direction.description ? `<small>${escapeHtml(direction.description)}</small>` : '';
+    const directionStops = (direction.orderedStopIds ?? []).map((id) => stops.find((stop) => stop.id === id && (!stop.directionId || stop.directionId === direction.id))).filter(Boolean);
+    const stopList = directionStops.length ? `<ol>${directionStops.map((stop) => `<li>${escapeHtml(stop.name)} <small>(${escapeHtml(stop.verificationStatus || 'unverified')})</small></li>`).join('')}</ol>` : '';
+    return `<li><strong>${escapeHtml(direction.label || direction.id)}</strong>${endpoints ? ` · ${endpoints}` : ''}${via}${description}${stopList}</li>`;
+  }).join('');
   const routeIds = escapeHtml(route.id);
   const routeNames = escapeHtml(`${route.jeepneyColorName} · ${route.name}`);
   const terminals = (route.verifiedTerminals ?? []).map((stop) => `<li>${escapeHtml(stop.terminalLabel)}: ${escapeHtml(stop.name)} <small>(based on observation)</small></li>`).join('');
@@ -66,6 +80,7 @@ export function renderRouteDetail(route, { hasGeometry = false } = {}) {
     ${vehicle}
     ${direction}
     <dt>Places on the map</dt><dd>${landmarks || 'Route details are still being added'} <small>These places do not confirm every stop or direction.</small></dd>
+    ${directions ? `<dt>Directions and recorded stops</dt><dd><ul class="detail-notes">${directions}</ul></dd>` : ''}
     <dt>Terminals</dt><dd>${terminals ? `<ul class="detail-notes">${terminals}</ul>` : 'Still being checked'}</dd>
     <dt>Route details</dt><dd>${hasGeometry ? 'Based on observation · needs community confirmation' : 'Needs confirmation'}</dd>
     <dt>Fare</dt><dd>${route.fareClass ? 'Estimated fare; see trip details' : 'Fare not confirmed'}</dd>

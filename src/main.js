@@ -22,12 +22,14 @@ import { buildFeedbackIssueUrl } from './services/feedback.js';
 const $ = (id) => document.getElementById(id);
 const notify = createNotifier({ statusEl: $('status-live'), alertEl: $('alert-banner') });
 const phoneLayout = matchMedia('(max-width: 640px), (max-width: 1000px) and (max-height: 500px)');
+const MAP_STYLE_PREFERENCE_KEY = 'sakay-angeles-map-style-v1';
 
 const state = {
   data: null,
   graph: null,
   map: null,
   mapReady: false,
+  mapStyle: MAP_CONFIG.defaultStyle,
   uiMode: phoneLayout.matches ? 'sheet-collapsed' : 'explore',
   inputReturnMode: 'sheet-half',
   pickReturnMode: 'sheet-half',
@@ -147,6 +149,9 @@ function setUiMode(mode) {
   body.classList.toggle('input-takeover', mode === 'input');
   body.classList.toggle('map-picking', mode === 'pick');
   $('mobile-panel-toggle').setAttribute('aria-expanded', String(plannerVisible));
+  $('mobile-panel-toggle').inert = plannerVisible;
+  $('sidebar').inert = !phone && collapsed;
+  $('planner-content').inert = (phone && (mode === 'sheet-collapsed' || mode === 'pick'));
   $('planner-close').textContent = phone
     ? mode === 'input' ? 'Back' : mode === 'sheet-collapsed' ? 'Open' : 'Collapse'
     : '×';
@@ -246,7 +251,7 @@ function selectRoute(id) {
   state.selectedRouteId = state.selectedRouteId === id ? null : id;
   const route = state.data.routes.find((r) => r.id === state.selectedRouteId);
   const has = route ? routeHasGeometry(route, state.data.geojson) : false;
-  $('route-detail').innerHTML = route ? renderRouteDetail(route, { hasGeometry: has }) : '';
+  $('route-detail').innerHTML = route ? renderRouteDetail(route, { hasGeometry: has, stops: state.data.stops.filter((stop) => stop.routeId === route.id) }) : '';
   if (route && has) {
     state.visible.add(route.id);
     if (state.mapReady) fitToRoutes(state.map, state.data.geojson, [route.id]);
@@ -616,9 +621,13 @@ function bindEvents() {
   }
   document.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => startPick(b.dataset.pick)));
   $('pick-cancel').onclick = () => { cancelPick(); notify.status('Map selection cancelled.'); };
-  $('mobile-panel-toggle').addEventListener('click', () => {
-    if (state.pick) cancelPick({ restoreFocus: false });
-    setUiMode(state.uiMode === 'explore' ? 'planner' : 'explore');
+  $('map-style-select').addEventListener('change', (event) => {
+    const style = event.currentTarget.value;
+    if (!MAP_CONFIG.styleUrls[style] || style === state.mapStyle || !state.map) return;
+    state.mapStyle = style;
+    try { window.localStorage.setItem(MAP_STYLE_PREFERENCE_KEY, style); } catch { /* current selection still works */ }
+    state.mapReady = false;
+    state.map.setStyle(MAP_CONFIG.styleUrls[style]);
   });
   $('planner-close').addEventListener('click', () => {
     if (state.pick) { cancelPick({ restoreFocus: false }); setUiMode(phoneLayout.matches ? 'sheet-collapsed' : 'explore'); }
@@ -712,6 +721,34 @@ function bindEvents() {
 
 // ---------- start ----------
 async function start() {
+  // Keep the base map and planner usable while route data is loading. A data
+  // validation or local-draft problem should not leave the page as a blank,
+  // non-interactive canvas.
+  $('mobile-panel-toggle').addEventListener('click', () => {
+    if (state.pick) cancelPick({ restoreFocus: false });
+    setUiMode(state.uiMode === 'explore' ? 'planner' : 'explore');
+  });
+  bindEvents();
+  try {
+    const savedStyle = window.localStorage.getItem(MAP_STYLE_PREFERENCE_KEY);
+    if (savedStyle && MAP_CONFIG.styleUrls[savedStyle]) state.mapStyle = savedStyle;
+  } catch { /* use the default style when storage is unavailable */ }
+  $('map-style-select').value = state.mapStyle;
+  const offline = new URLSearchParams(location.search).has('offline');
+  const { map, error } = createMap($('map'), (msg) => notify.alert(msg), {
+    offline,
+    styleUrl: MAP_CONFIG.styleUrls[state.mapStyle],
+  });
+  if (error) {
+    $('map-fallback').hidden = false;
+    $('map-fallback').innerHTML = '<p><b>The map could not load.</b><br>You can still browse routes and plan a trip.</p>';
+  } else {
+    state.map = map;
+    map.on('click', handleMapClick);
+    map.on('style.load', attachRouteDataToMap);
+    map.on('load', attachRouteDataToMap);
+  }
+
   const loaded = await loadData(import.meta.env.BASE_URL);
   if (!loaded.ok) {
     if (import.meta.env.DEV) {
@@ -742,29 +779,35 @@ async function start() {
   state.graph = buildGraph(state.data);
   state.draftLines = buildDraftLines(state.data.geojson, state.data.routes);
   state.visible = new Set(routesWithGeometry().map((r) => r.id));
-  renderDataBanner(); renderLegend(); renderRouteList(); bindEvents();
-
-  const offline = new URLSearchParams(location.search).has('offline');
-  const { map, error } = createMap($('map'), (msg) => notify.alert(msg), { offline });
-  if (error) {
-    $('map-fallback').hidden = false;
-    $('map-fallback').innerHTML = '<p><b>The map could not load.</b><br>You can still browse routes and plan a trip.</p>';
-    return;
-  }
-  state.map = map;
-  if (import.meta.env.DEV && offline) window.__sakay = state; // development-only test hook
-  map.on('click', handleMapClick);
-  map.on('load', () => {
-    addRouteLayers(map, state.data.geojson, state.data.routes);
-    addTripLayers(map);
-    onRouteClick(map, (id) => { if (!state.pick) selectRoute(id); });
-    state.mapReady = true;
-    for (const terminal of state.data.stops.filter((stop) => stop.kind === 'terminal' && stop.verificationStatus === 'verified')) {
-      state.terminalMarkers.push(makeMarker(map, 'terminal', terminal.coordinates, `${terminal.name} · based on observation`));
-    }
-    syncMap();
-    fitToRoutes(map, state.data.geojson, null);
-  });
+  renderDataBanner(); renderLegend(); renderRouteList();
+  if (state.map?.isStyleLoaded()) attachRouteDataToMap();
 }
 
-start();
+function attachRouteDataToMap() {
+  const map = state.map;
+  if (!map || !state.data || state.mapReady) return;
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('offline')) window.__sakay = state; // development-only test hook
+  for (const marker of state.terminalMarkers) marker.remove();
+  state.terminalMarkers = [];
+  addRouteLayers(map, state.data.geojson, state.data.routes);
+  addTripLayers(map);
+  onRouteClick(map, (id) => { if (!state.pick) selectRoute(id); });
+  state.mapReady = true;
+  for (const terminal of state.data.stops.filter((stop) => stop.kind === 'terminal' && stop.verificationStatus === 'verified')) {
+    state.terminalMarkers.push(makeMarker(map, 'terminal', terminal.coordinates, `${terminal.name} · based on observation`));
+  }
+  syncMap();
+  fitToRoutes(map, state.data.geojson, null);
+  if (state.draftResult?.status === DRAFT_STATUS.SUCCESS) {
+    const selected = state.draftResult.itineraries[state.draftIndex];
+    if (selected) paintDraftItinerary(state.draftResult, selected);
+  } else if (state.tripActive && state.result?.status === PLAN_STATUS.SUCCESS) {
+    showItinerary(state.selectedItinerary ?? 0);
+  }
+}
+
+start().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  $('data-banner').textContent = `The community guide could not finish starting: ${message}`;
+  notify.alert('The community guide could not finish starting. Reload the page to try again.');
+});

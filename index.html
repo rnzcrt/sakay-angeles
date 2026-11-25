@@ -23,7 +23,7 @@
   <aside class="sidebar" id="sidebar">
     <button type="button" class="sheet-handle" id="sheet-handle" aria-controls="sidebar" aria-expanded="false" aria-label="Expand trip planner"><span></span></button>
     <div class="planner-head"><h2 id="planner-title" class="section-title" tabindex="-1">Plan a trip</h2><button type="button" class="btn btn-ghost planner-close" id="planner-close" aria-label="Close trip planner">×</button></div>
-    <div class="planner-content">
+    <div class="planner-content" id="planner-content">
     <p class="eyebrow">Explore first, then plan</p>
     <h1>Where are you headed?</h1>
     <div id="data-banner" class="notice" role="status">Help improve Sakay Angeles! Routes and fares may need corrections. Send feedback based on your real trip so we can improve this guide.</div>
@@ -91,6 +91,13 @@
 
   <section class="map-wrap" id="map-wrap" aria-label="Map">
     <div id="map" class="map"></div>
+    <label class="map-style-control" for="map-style-select">
+      <span>Map style</span>
+      <select id="map-style-select" aria-label="Map style">
+        <option value="positron">Positron · light</option>
+        <option value="fiord">Fiord · muted</option>
+      </select>
+    </label>
     <button type="button" class="map-panel-toggle" id="mobile-panel-toggle" aria-label="Plan a trip" aria-controls="sidebar" aria-expanded="false"><span class="tab-label" aria-hidden="true">PLAN A TRIP</span></button>
     <div id="pick-banner" class="pick-banner" role="status" aria-live="polite" hidden>
       <span class="pick-copy"><strong id="pick-title"></strong><small id="pick-help">Tap the map to choose this location.</small></span><button type="button" class="btn btn-ghost" id="pick-cancel">Cancel</button>
